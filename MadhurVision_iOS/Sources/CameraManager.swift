@@ -68,10 +68,11 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if let baseAddress = baseAddress {
             let data = Data(bytes: baseAddress, count: dataSize)
             // Compress to JPEG for transmission
-            if let cgImage = CGImage.create(from: imageBuffer),
-               let uiImage = UIImage(cgImage: cgImage),
-               let jpegData = uiImage.jpegData(compressionQuality: 0.6) {
-                NetworkManager.shared.sendVideoFrame(data: jpegData)
+            if let cgImage = CGImage.create(from: imageBuffer) {
+                let uiImage = UIImage(cgImage: cgImage)
+                if let jpegData = uiImage.jpegData(compressionQuality: 0.6) {
+                    NetworkManager.shared.sendVideoFrame(data: jpegData)
+                }
             }
         }
         
