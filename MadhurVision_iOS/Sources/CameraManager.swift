@@ -22,6 +22,11 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
     
+    func stop() {
+        guard captureSession.isRunning else { return }
+        captureSession.stopRunning()
+    }
+    
     private func setupCamera() {
         captureSession.sessionPreset = .hd1280x720
         

@@ -42,6 +42,14 @@ class NetworkManager: ObservableObject {
         connection?.start(queue: queue)
     }
     
+    func disconnect() {
+        connection?.cancel()
+        connection = nil
+        DispatchQueue.main.async {
+            self.isConnected = false
+        }
+    }
+    
     func sendVideoFrame(data: Data) {
         guard isConnected else { return }
         
