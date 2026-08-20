@@ -1,5 +1,7 @@
 import Foundation
 import AVFoundation
+import UIKit
+import CoreImage
 
 class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     static let shared = CameraManager()
@@ -80,7 +82,7 @@ class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 extension CGImage {
     static func create(from pixelBuffer: CVPixelBuffer) -> CGImage? {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext(options: nil)
+        let context = CIContext()
         return context.createCGImage(ciImage, from: ciImage.extent)
     }
 }

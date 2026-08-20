@@ -12,7 +12,7 @@ class MotionManager {
         guard motionManager.isDeviceMotionAvailable else { return }
         
         motionManager.deviceMotionUpdateInterval = 1.0 / 60.0 // 60Hz
-        motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] (motion, error) in
+        motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: OperationQueue.main) { [weak self] (motion, error) in
             guard let motion = motion else { return }
             
             // Send yaw, pitch, roll to PC
