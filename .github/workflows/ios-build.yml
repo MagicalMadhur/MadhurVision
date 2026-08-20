@@ -1,0 +1,51 @@
+name: Build iOS App (Unsigned IPA)
+
+on:
+  push:
+    paths:
+      - 'MadhurVision_iOS/**'
+      - '.github/workflows/ios-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: |
+          cd MadhurVision_iOS
+          xcodegen generate
+
+      - name: Build Unsigned App
+        run: |
+          cd MadhurVision_iOS
+          xcodebuild clean build \
+            -project MadhurVision.xcodeproj \
+            -scheme MadhurVision \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY=""
+
+      - name: Package into IPA
+        run: |
+          cd MadhurVision_iOS
+          mkdir -p Payload
+          # Move the built .app into Payload directory
+          mv build/Release-iphoneos/MadhurVision.app Payload/
+          # Zip the Payload directory into an .ipa file
+          zip -r MadhurVision.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: MadhurVision.ipa
+          path: MadhurVision_iOS/MadhurVision.ipa

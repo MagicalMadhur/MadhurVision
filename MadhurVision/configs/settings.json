@@ -1,0 +1,92 @@
+{
+  "display": {
+    "width": 1920,
+    "height": 1080,
+    "fps_target": 60,
+    "fullscreen": false,
+    "vsync": true,
+    "vr_enabled": true
+  },
+  "camera": {
+    "source": "webrtc",
+    "local_camera_index": 0,
+    "resolution": [
+      1920,
+      1080
+    ],
+    "fps": 30,
+    "mirror": true
+  },
+  "network": {
+    "server_host": "0.0.0.0",
+    "server_port": 8080,
+    "ssl_cert_path": "certs/cert.pem",
+    "ssl_key_path": "certs/key.pem",
+    "stun_server": "stun:stun.l.google.com:19302",
+    "max_latency_ms": 50
+  },
+  "tracking": {
+    "min_detection_confidence": 0.7,
+    "min_tracking_confidence": 0.7,
+    "max_num_hands": 2,
+    "head_smoothing_factor": 0.85,
+    "head_sensitivity": 1.0
+  },
+  "gesture": {
+    "pinch_threshold": 0.05,
+    "pinch_release_threshold": 0.07,
+    "grab_threshold": 0.1,
+    "swipe_velocity_threshold": 0.8,
+    "swipe_min_distance": 0.15,
+    "scroll_threshold": 0.02,
+    "zoom_threshold": 0.03,
+    "debounce_time": 0.15,
+    "calibration_path": "configs/calibration.json"
+  },
+  "depth": {
+    "enabled": true,
+    "model_type": "MiDaS_small",
+    "use_cuda": true,
+    "process_interval": 3
+  },
+  "voice": {
+    "enabled": true,
+    "model_path": "models/vosk-model-small-en-us-0.15",
+    "sample_rate": 16000,
+    "wake_word": "",
+    "auto_download": true
+  },
+  "vr": {
+    "ipd": 0.063,
+    "distortion_k1": 0.22,
+    "distortion_k2": 0.24,
+    "fov": 90.0,
+    "screen_to_lens": 0.042
+  },
+  "spatial": {
+    "default_window_width": 0.8,
+    "default_window_height": 0.5,
+    "default_window_distance": 1.5,
+    "max_windows": 20,
+    "default_opacity": 0.92,
+    "anchor_file": "configs/anchors.json",
+    "near_clip": 0.1,
+    "far_clip": 100.0
+  },
+  "desktop": {
+    "capture_fps": 30,
+    "monitor_index": 0,
+    "failsafe": true,
+    "mouse_sensitivity": 1.5
+  },
+  "debug": {
+    "enabled": false,
+    "show_fps": true,
+    "show_landmarks": true,
+    "show_depth_map": false,
+    "show_gesture_state": true,
+    "show_connection_status": true,
+    "log_level": "INFO",
+    "profile_enabled": false
+  }
+}

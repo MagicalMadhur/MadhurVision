@@ -1,0 +1,46 @@
+{
+  "win_1": {
+    "id": "win_1",
+    "title": "Desktop Stream",
+    "type": "DESKTOP_STREAM",
+    "position": [
+      0.0,
+      0.2,
+      -1.5
+    ],
+    "rotation": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "scale": [
+      0.8,
+      0.5
+    ],
+    "opacity": 0.92,
+    "anchor_id": null
+  },
+  "win_2": {
+    "id": "",
+    "title": "System Status",
+    "type": "STATUS",
+    "position": [
+      -0.8,
+      0.5,
+      -1.0
+    ],
+    "rotation": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "scale": [
+      0.35,
+      0.5
+    ],
+    "opacity": 0.85,
+    "anchor_id": null
+  }
+}

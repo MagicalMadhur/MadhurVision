@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Madhur Vision — Camera Stream</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background: #0a0a0f;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 16px 20px;
+            background: rgba(10, 10, 15, 0.9);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+            color: white;
+        }
+
+        .title {
+            font-size: 17px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #c4b5fd, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-container {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .status-ring {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 3px solid rgba(99, 102, 241, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            position: relative;
+            transition: all 0.5s ease;
+        }
+
+        .status-ring.connecting {
+            border-color: rgba(251, 191, 36, 0.5);
+            animation: pulse 2s infinite;
+        }
+
+        .status-ring.connected {
+            border-color: rgba(52, 211, 153, 0.6);
+            box-shadow: 0 0 30px rgba(52, 211, 153, 0.2);
+        }
+
+        .status-ring.error {
+            border-color: rgba(239, 68, 68, 0.5);
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+        }
+
+        .status-icon {
+            font-size: 40px;
+        }
+
+        .status-text {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .status-detail {
+            font-size: 13px;
+            color: #888;
+            line-height: 1.5;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 24px;
+            padding: 0 20px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #a78bfa;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            border: none;
+            padding: 14px 32px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 24px;
+            transition: all 0.3s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .btn:active {
+            transform: scale(0.96);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #videoPreview {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 120px;
+            height: 90px;
+            border-radius: 12px;
+            border: 2px solid rgba(99, 102, 241, 0.4);
+            object-fit: cover;
+            z-index: 100;
+            display: none;
+        }
+
+        #remoteVideo {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: 200;
+            display: none;
+            background: black;
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="logo">M</div>
+        <div class="title">Madhur Vision</div>
+    </div>
+
+    <div class="status-container" id="statusContainer">
+        <div class="status-ring" id="statusRing">
+            <div class="status-icon" id="statusIcon">📡</div>
+        </div>
+        <div class="status-text" id="statusText">Ready to Connect</div>
+        <div class="status-detail" id="statusDetail">
+            Tap the button below to stream your camera to your PC
+        </div>
+        <button class="btn" id="connectBtn" onclick="startStreaming()">
+            Start Streaming
+        </button>
+    </div>
+
+    <div class="stats" id="stats">
+        <div class="stat-card">
+            <div class="stat-value" id="fpsValue">--</div>
+            <div class="stat-label">FPS</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="resValue">--</div>
+            <div class="stat-label">Resolution</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="orientValue">--</div>
+            <div class="stat-label">Gyro Hz</div>
+        </div>
+    </div>
+
+    <video id="videoPreview" autoplay playsinline muted></video>
+    <video id="remoteVideo" autoplay playsinline muted></video>
+
+    <script>
+        // ─── State ──────────────────────────────────────────────
+        let pc = null;
+        let dataChannel = null;
+        let localStream = null;
+        let orientationInterval = null;
+        let frameCount = 0;
+        let lastFpsTime = performance.now();
+        let orientationCount = 0;
+        let lastOrientTime = performance.now();
+
+        // ─── UI Helpers ─────────────────────────────────────────
+        function setStatus(state, icon, text, detail) {
+            const ring = document.getElementById('statusRing');
+            ring.className = 'status-ring ' + state;
+            document.getElementById('statusIcon').textContent = icon;
+            document.getElementById('statusText').textContent = text;
+            document.getElementById('statusDetail').textContent = detail;
+        }
+
+        // ─── Main Streaming Logic ───────────────────────────────
+        async function startStreaming() {
+            const btn = document.getElementById('connectBtn');
+            btn.disabled = true;
+            btn.textContent = 'Connecting...';
+            setStatus('connecting', '🔄', 'Connecting...', 'Requesting camera access...');
+
+            try {
+                // 1. Get camera access (prefer rear camera, 1080p)
+                const constraints = {
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: false
+                };
+
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+                // Show preview
+                const preview = document.getElementById('videoPreview');
+                preview.srcObject = localStream;
+                preview.style.display = 'block';
+
+                const videoTrack = localStream.getVideoTracks()[0];
+                const trackSettings = videoTrack.getSettings();
+                document.getElementById('resValue').textContent = 
+                    `${trackSettings.width || '?'}p`;
+
+                setStatus('connecting', '🔄', 'Connecting...', 'Establishing WebRTC connection...');
+
+                // 2. Create peer connection
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+
+                // Add video track
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+                // Listen for incoming return track (VR video)
+                pc.ontrack = (event) => {
+                    console.log("Received remote track:", event.track.kind);
+                    if (event.track.kind === 'video') {
+                        const remoteVideo = document.getElementById('remoteVideo');
+                        if (!remoteVideo.srcObject) {
+                            if (event.streams && event.streams.length > 0) {
+                                remoteVideo.srcObject = event.streams[0];
+                            } else {
+                                remoteVideo.srcObject = new MediaStream([event.track]);
+                            }
+                        }
+                    }
+                };
+
+                // 3. Create data channel for orientation/sensor data
+                dataChannel = pc.createDataChannel('sensors', { 
+                    ordered: false,
+                    maxRetransmits: 0  // Unreliable for low latency
+                });
+
+                dataChannel.onopen = () => {
+                    console.log('Data channel open');
+                    startOrientationStreaming();
+                };
+
+                // 4. Create and send offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // Wait for ICE gathering
+                await new Promise((resolve) => {
+                    if (pc.iceGatheringState === 'complete') {
+                        resolve();
+                    } else {
+                        pc.addEventListener('icegatheringstatechange', () => {
+                            if (pc.iceGatheringState === 'complete') resolve();
+                        });
+                        // Timeout after 5 seconds
+                        setTimeout(resolve, 5000);
+                    }
+                });
+
+                // 5. Send offer to server
+                const response = await fetch('/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: pc.localDescription.sdp,
+                        type: pc.localDescription.type
+                    })
+                });
+
+                const answer = await response.json();
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+                // 6. Monitor connection state
+                pc.onconnectionstatechange = () => {
+                    switch (pc.connectionState) {
+                        case 'connected':
+                            setStatus('connected', '✅', 'Streaming', 
+                                'Camera feed is being sent to your PC');
+                            btn.textContent = 'Disconnect';
+                            btn.disabled = false;
+                            btn.onclick = stopStreaming;
+                            startFpsCounter();
+                            
+                            // Hide UI and show remote video
+                            document.querySelector('.header').style.display = 'none';
+                            document.getElementById('statusContainer').style.display = 'none';
+                            document.getElementById('stats').style.display = 'none';
+                            document.getElementById('videoPreview').style.display = 'none';
+                            document.getElementById('remoteVideo').style.display = 'block';
+                            
+                            try { document.documentElement.requestFullscreen(); } catch (e) {}
+                            break;
+                        case 'disconnected':
+                        case 'failed':
+                            setStatus('error', '❌', 'Disconnected', 
+                                'Connection lost. Tap to reconnect.');
+                            btn.textContent = 'Reconnect';
+                            btn.disabled = false;
+                            btn.onclick = startStreaming;
+                            break;
+                    }
+                };
+
+            } catch (error) {
+                console.error('Streaming error:', error);
+                setStatus('error', '❌', 'Error', error.message);
+                btn.textContent = 'Retry';
+                btn.disabled = false;
+                btn.onclick = startStreaming;
+            }
+        }
+
+        // ─── Orientation Streaming ──────────────────────────────
+        function startOrientationStreaming() {
+            // Request permission for DeviceOrientation (required in iOS 13+)
+            if (typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(state => {
+                        if (state === 'granted') {
+                            window.addEventListener('deviceorientation', sendOrientation);
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                window.addEventListener('deviceorientation', sendOrientation);
+            }
+
+            // Also capture device motion (accelerometer)
+            if (typeof DeviceMotionEvent !== 'undefined' &&
+                typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(state => {
+                        if (state === 'granted') {
+                            window.addEventListener('devicemotion', sendMotion);
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                window.addEventListener('devicemotion', sendMotion);
+            }
+        }
+
+        function sendOrientation(event) {
+            if (dataChannel && dataChannel.readyState === 'open') {
+                const data = {
+                    alpha: event.alpha || 0,   // Yaw: 0-360
+                    beta: event.beta || 0,     // Pitch: -180 to 180
+                    gamma: event.gamma || 0,   // Roll: -90 to 90
+                    timestamp: performance.now()
+                };
+                try {
+                    dataChannel.send(JSON.stringify(data));
+                    orientationCount++;
+                } catch (e) {
+                    // Channel might be closing
+                }
+            }
+        }
+
+        function sendMotion(event) {
+            if (dataChannel && dataChannel.readyState === 'open') {
+                const acc = event.accelerationIncludingGravity;
+                if (acc) {
+                    const data = {
+                        accel_x: acc.x || 0,
+                        accel_y: acc.y || 0,
+                        accel_z: acc.z || 0,
+                        type: 'motion',
+                        timestamp: performance.now()
+                    };
+                    try {
+                        dataChannel.send(JSON.stringify(data));
+                    } catch (e) {}
+                }
+            }
+        }
+
+        // ─── FPS Counter ────────────────────────────────────────
+        function startFpsCounter() {
+            setInterval(() => {
+                const now = performance.now();
+                
+                // Orientation Hz
+                const orientElapsed = (now - lastOrientTime) / 1000;
+                const orientHz = Math.round(orientationCount / orientElapsed);
+                document.getElementById('orientValue').textContent = orientHz;
+                orientationCount = 0;
+                lastOrientTime = now;
+            }, 1000);
+        }
+
+        // ─── Stop Streaming ─────────────────────────────────────
+        function stopStreaming() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            if (orientationInterval) {
+                clearInterval(orientationInterval);
+            }
+            window.removeEventListener('deviceorientation', sendOrientation);
+            window.removeEventListener('devicemotion', sendMotion);
+
+            document.getElementById('videoPreview').style.display = 'none';
+            
+            // Show UI again
+            document.querySelector('.header').style.display = 'flex';
+            document.getElementById('statusContainer').style.display = 'block';
+            document.getElementById('stats').style.display = 'grid';
+            
+            const remoteVideo = document.getElementById('remoteVideo');
+            remoteVideo.style.display = 'none';
+            remoteVideo.srcObject = null;
+            
+            try { document.exitFullscreen(); } catch(e) {}
+
+            setStatus('', '📡', 'Disconnected', 'Tap to reconnect');
+            
+            const btn = document.getElementById('connectBtn');
+            btn.textContent = 'Start Streaming';
+            btn.disabled = false;
+            btn.onclick = startStreaming;
+        }
+
+        // ─── Keep Screen Awake ──────────────────────────────────
+        async function keepAwake() {
+            try {
+                if ('wakeLock' in navigator) {
+                    await navigator.wakeLock.request('screen');
+                }
+            } catch (e) {
+                console.log('Wake lock not available');
+            }
+        }
+        keepAwake();
+    </script>
+</body>
+</html>

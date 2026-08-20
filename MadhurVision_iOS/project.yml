@@ -1,0 +1,18 @@
+name: MadhurVision
+options:
+  bundleIdPrefix: com.madhur
+targets:
+  MadhurVision:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [Sources]
+    settings:
+      base:
+        INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
+        INFOPLIST_KEY_NSCameraUsageDescription: "Camera access is required for VR tracking."
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Local network access is required to connect to the PC."
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGNING_ALLOWED: "NO"
+        ENABLE_BITCODE: "NO"
