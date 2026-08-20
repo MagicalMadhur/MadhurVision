@@ -44,22 +44,22 @@ class CameraManager:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._source = settings.camera.source
-        # WebRTC server reference (set externally when using WebRTC)
+        # Remote servers
         self._webrtc_server = None
+        self._native_server = None
 
     def set_webrtc_server(self, server) -> None:
-        """
-        Attach a WebRTC server for remote camera feed.
-        Called by the networking module when WebRTC is configured.
-        """
+        """Attach a WebRTC server for remote camera feed."""
         self._webrtc_server = server
         self._source = "webrtc"
+        
+    def set_native_server(self, server) -> None:
+        """Attach a Native iOS TCP server for remote camera feed."""
+        self._native_server = server
+        self._source = "native"
 
     def push_frame(self, frame_data: FrameData) -> None:
-        """
-        External push for WebRTC or any remote source.
-        The networking module calls this when a new frame arrives.
-        """
+        """External push for WebRTC/Native or any remote source."""
         self._buffer.push(frame_data)
 
     def start(self) -> None:

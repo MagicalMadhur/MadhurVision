@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Xcodegen
         run: brew install xcodegen
@@ -45,7 +45,7 @@ jobs:
           zip -r MadhurVision.ipa Payload
 
       - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: MadhurVision.ipa
           path: MadhurVision_iOS/MadhurVision.ipa

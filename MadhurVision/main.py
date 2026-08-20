@@ -143,6 +143,17 @@ def start_webrtc_server(camera_manager):
 
     return server, loop
 
+def start_native_server(camera_manager):
+    """Start Native iOS Socket Server."""
+    from networking.socket_server import NativeSocketServer
+    
+    server = NativeSocketServer()
+    camera_manager.set_native_server(server)
+    server.start()
+    
+    return server
+
+
 
 def main():
     """Main application entry point."""
@@ -187,8 +198,10 @@ def main():
     from cameras.camera_manager import CameraManager
     camera = CameraManager()
 
-    # 2. WebRTC (if needed)
+    # 2. WebRTC / Native (if needed)
     webrtc_server = None
+    native_server = None
+    
     if args.camera == "webrtc":
         try:
             webrtc_server, webrtc_loop = start_webrtc_server(camera)
@@ -196,6 +209,13 @@ def main():
         except Exception as e:
             logger.error(f"WebRTC failed: {e}")
             logger.info("Falling back to local camera")
+            settings.camera.source = "local"
+    elif args.camera == "native":
+        try:
+            native_server = start_native_server(camera)
+            logger.info("Native iOS Socket Server started — connect using MadhurVision app")
+        except Exception as e:
+            logger.error(f"Native server failed: {e}")
             settings.camera.source = "local"
 
     camera.start()
@@ -399,7 +419,7 @@ def main():
                 engine.render_hud(hud_info)
                 engine.end_frame()
 
-                if webrtc_server:
+                if webrtc_server or native_server:
                     import pygame
                     surface = pygame.display.get_surface()
                     if surface:
@@ -408,9 +428,13 @@ def main():
                         rgb_array = rgb_array.transpose([1, 0, 2])
                         bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
                         
-                        # Resize for lower network latency
-                        small_bgr = cv2.resize(bgr_array, (960, 540))
-                        webrtc_server.push_rendered_frame(small_bgr)
+                        if webrtc_server:
+                            # Resize for lower network latency on WiFi
+                            small_bgr = cv2.resize(bgr_array, (960, 540))
+                            webrtc_server.push_rendered_frame(small_bgr)
+                        if native_server:
+                            # Send full HD frame over USB
+                            native_server.push_rendered_frame(bgr_array)
 
             # ── 7. Debug Dashboard ───────────────────────────
             if debug_dashboard:
@@ -458,6 +482,8 @@ def main():
                 if webrtc_server:
                     small_bgr = cv2.resize(display_frame, (960, 540))
                     webrtc_server.push_rendered_frame(small_bgr)
+                if native_server:
+                    native_server.push_rendered_frame(display_frame)
                     
                 key = cv2.waitKey(1) & 0xFF
                 if key == 27:
