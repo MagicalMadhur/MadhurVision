@@ -34,6 +34,9 @@ class HandTrackingManager: NSObject {
     // Frame processing mutex
     private var isProcessingFrame = false
 
+    // Shared CIContext to avoid OOM allocations per frame
+    private let ciContext = CIContext(options: [CIContextOption.useSoftwareRenderer: false])
+
     private override init() {
         super.init()
     }
@@ -52,17 +55,25 @@ class HandTrackingManager: NSObject {
         guard isRunning, !isProcessingFrame else { return }
         isProcessingFrame = true
         
-        // CVPixelBuffer must be strongly held while we are on the async queue,
-        // although Vision implicitly handles CVPixelBuffer lifecycle correctly
-        // as long as we don't flood the queue. The mutex above prevents flooding.
+        // CVPixelBuffer memory is owned by the camera hardware's IOSurface pool.
+        // It can be overwritten at any time, causing EX_BAD_ACCESS in Vision.
+        // We must synchronously lock it or copy it. Creating a CGImage forces a safe memory copy!
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
+            self.isProcessingFrame = false
+            return
+        }
+        
         processingQueue.async { [weak self] in
-            defer { self?.isProcessingFrame = false }
-            self?.runVision(on: pixelBuffer)
+            autoreleasepool {
+                defer { self?.isProcessingFrame = false }
+                self?.runVision(on: cgImage)
+            }
         }
     }
 
-    private func runVision(on pixelBuffer: CVPixelBuffer) {
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
+    private func runVision(on image: CGImage) {
+        let handler = VNImageRequestHandler(cgImage: image, orientation: .up, options: [:])
         do {
             try handler.perform([handPoseRequest])
         } catch {

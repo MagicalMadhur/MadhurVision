@@ -41,30 +41,29 @@ class DualEyeContainerView: UIView {
     let rightView: SCNView
     
     // Hardware-accelerated GPU passthrough
-    private let leftPreview: AVCaptureVideoPreviewLayer
-    private let rightPreview: AVCaptureVideoPreviewLayer
+    private let cameraPreview: AVCaptureVideoPreviewLayer
+    private let replicatorLayer: CAReplicatorLayer
     
     init(leftView: SCNView, rightView: SCNView) {
         self.leftView = leftView
         self.rightView = rightView
         
-        leftPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
-        leftPreview.videoGravity = .resizeAspectFill
-        rightPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
-        rightPreview.videoGravity = .resizeAspectFill
+        cameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
+        cameraPreview.videoGravity = .resizeAspectFill
+        
+        replicatorLayer = CAReplicatorLayer()
+        replicatorLayer.instanceCount = 2
         
         super.init(frame: .zero)
         self.backgroundColor = .black
         
-        if let conn = leftPreview.connection, conn.isVideoOrientationSupported {
-            conn.videoOrientation = .landscapeRight
-        }
-        if let conn = rightPreview.connection, conn.isVideoOrientationSupported {
+        if let conn = cameraPreview.connection, conn.isVideoOrientationSupported {
             conn.videoOrientation = .landscapeRight
         }
         
-        self.layer.addSublayer(leftPreview)
-        self.layer.addSublayer(rightPreview)
+        replicatorLayer.addSublayer(cameraPreview)
+        self.layer.addSublayer(replicatorLayer)
+        
         self.addSubview(leftView)
         self.addSubview(rightView)
     }
@@ -74,14 +73,13 @@ class DualEyeContainerView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let halfWidth = bounds.width / 2.0
-        let leftF = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
-        let rightF = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
         
-        leftPreview.frame = leftF
-        leftView.frame = leftF
+        cameraPreview.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
+        replicatorLayer.frame = bounds
+        replicatorLayer.instanceTransform = CATransform3DMakeTranslation(halfWidth, 0, 0)
         
-        rightPreview.frame = rightF
-        rightView.frame = rightF
+        leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
+        rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
     }
 }
 
