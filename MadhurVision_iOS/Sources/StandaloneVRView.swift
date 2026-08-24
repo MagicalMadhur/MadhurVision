@@ -2,6 +2,7 @@ import SwiftUI
 import SceneKit
 import CoreMotion
 import Combine
+import AVFoundation
 
 struct StandaloneVRView: View {
     @ObservedObject var appState: AppState
