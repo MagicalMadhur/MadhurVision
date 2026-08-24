@@ -59,10 +59,13 @@ class VRBrowserNode: SCNNode {
                   let window = windowScene.windows.first else { return }
             
             // HACK: iOS 14+ SceneKit will SUSPEND the WKWebView rendering if it is completely hidden 
-            // behind the VR scene (occlusion culling). This causes a completely black texture!
-            // To bypass this, we add it IN FRONT of everything, but push it massively off-screen!
+            // behind the VR scene (occlusion culling) or off-screen (bounds clipping). 
+            // This causes a completely black or white texture!
+            // To bypass this, we add it IN FRONT of everything, but set alpha to 0.01!
+            // SceneKit captures the layer's backing store (which remains 100% opaque), 
+            // but the view is invisible to the user's 2D screen!
             self.webView.frame = CGRect(x: 0, y: 0, width: webWidth, height: webHeight)
-            self.webView.transform = CGAffineTransform(translationX: 9999, y: 9999)
+            self.webView.alpha = 0.01
             self.webView.isUserInteractionEnabled = false
             window.addSubview(self.webView)
         }
