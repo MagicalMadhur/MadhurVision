@@ -36,8 +36,8 @@ class VRBrowserNode: SCNNode {
         webConfig.userContentController.addUserScript(scrollUserScript)
         
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: webWidth, height: webHeight), configuration: webConfig)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
+        webView.isOpaque = true // Must be true so SceneKit doesn't render it transparent
+        webView.backgroundColor = .black
         
         // Spoof iPad User-Agent: gives desktop-class layout but properly handles viewport scaling and touch/mouse logic!
         webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
@@ -46,10 +46,7 @@ class VRBrowserNode: SCNNode {
         let material = SCNMaterial()
         material.diffuse.contents = webView
         material.isDoubleSided = true
-        
-        // Ensure lighting doesn't wash out the screen
         material.lightingModel = .constant
-        
         plane.materials = [material]
         
         // 4. Load the page
@@ -61,8 +58,13 @@ class VRBrowserNode: SCNNode {
             guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                   let window = windowScene.windows.first else { return }
             
-            // Insert at index 0 so it stays hidden behind the SCNView but remains active
-            window.insertSubview(self.webView, at: 0)
+            // HACK: iOS 14+ SceneKit will SUSPEND the WKWebView rendering if it is completely hidden 
+            // behind the VR scene (occlusion culling). This causes a completely black texture!
+            // To bypass this, we add it IN FRONT of everything, but push it massively off-screen!
+            self.webView.frame = CGRect(x: 0, y: 0, width: webWidth, height: webHeight)
+            self.webView.transform = CGAffineTransform(translationX: 9999, y: 9999)
+            self.webView.isUserInteractionEnabled = false
+            window.addSubview(self.webView)
         }
     }
     
