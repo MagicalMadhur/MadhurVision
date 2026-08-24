@@ -121,6 +121,9 @@ class VREngine: ObservableObject {
     private let cameraRig   = SCNNode()
     private let motionManager = CMMotionManager()
     
+    // The anchor node that centers the entire OS relative to the user's starting orientation
+    private let osAnchorNode = SCNNode()
+    
     // OS Nodes
     private var loadingNode: VRLoadingNode?
     private var dockNode: VRDockNode?
@@ -231,6 +234,9 @@ class VREngine: ObservableObject {
         ambient.light?.type = .ambient
         ambient.light?.intensity = 400
         scene.rootNode.addChildNode(ambient)
+        
+        // Add osAnchorNode to the scene
+        scene.rootNode.addChildNode(osAnchorNode)
     }
     
     private func setupCameras() {
@@ -257,7 +263,7 @@ class VREngine: ObservableObject {
         let loader = VRLoadingNode()
         // Center it slightly higher than eye level
         loader.position = SCNVector3(0, 0.1, browserDistance)
-        scene.rootNode.addChildNode(loader)
+        osAnchorNode.addChildNode(loader)
         self.loadingNode = loader
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
@@ -280,7 +286,7 @@ class VREngine: ObservableObject {
         dock.position = SCNVector3(-1.1, 0.1, browserDistance + 0.2) 
         dock.eulerAngles = SCNVector3(0, Float.pi / 8, 0) // turned slightly towards user
         dock.opacity = 0
-        scene.rootNode.addChildNode(dock)
+        osAnchorNode.addChildNode(dock)
         self.dockNode = dock
         
         dock.runAction(SCNAction.fadeIn(duration: 0.5))
@@ -321,7 +327,7 @@ class VREngine: ObservableObject {
         newNode.scale = SCNVector3(0.01, 0.01, 0.01)
         newNode.runAction(SCNAction.scale(to: CGFloat(browserScale), duration: 0.4))
         
-        scene.rootNode.addChildNode(newNode)
+        osAnchorNode.addChildNode(newNode)
         self.activeWindowNode = newNode
     }
     
@@ -362,12 +368,10 @@ class VREngine: ObservableObject {
             if !self.hasCenteredBrowser {
                 self.hasCenteredBrowser = true
                 
-                // Spawn it exactly browserDistance in front of where the user is looking NOW
-                let localFront = SCNVector3(0, 0, self.browserDistance)
-                let worldFront = self.cameraRig.convertPosition(localFront, to: nil)
-                
-                self.loadingNode?.position = worldFront
-                self.loadingNode?.eulerAngles = self.cameraRig.eulerAngles
+                // Align the OS anchor to the user's initial look direction
+                self.osAnchorNode.position = self.cameraRig.position
+                // Only match the yaw (rotation around Y axis) so the OS stays level with the floor
+                self.osAnchorNode.eulerAngles = SCNVector3(0, self.cameraRig.eulerAngles.y, 0)
             }
         }
     }

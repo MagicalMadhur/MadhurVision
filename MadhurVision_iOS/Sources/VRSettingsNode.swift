@@ -47,6 +47,7 @@ class VRSettingsNode: SCNNode {
         }
         
         mat.diffuse.contents = skScene
+        mat.diffuse.contentsTransform = SCNMatrix4Translate(SCNMatrix4MakeScale(1, -1, 1), 0, 1, 0)
         mat.isDoubleSided = true
         plane.materials = [mat]
         self.geometry = plane
