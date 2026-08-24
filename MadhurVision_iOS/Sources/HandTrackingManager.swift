@@ -1,6 +1,7 @@
 import AVFoundation
 import Vision
 import Combine
+import CoreImage
 
 /// Detects hand pose from camera frames and publishes
 /// normalized finger positions and gesture states.
@@ -53,7 +54,7 @@ class HandTrackingManager: NSObject {
 
         // Capture immutable CGImage synchronously to avoid CVPixelBuffer mutation crashes
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext(options: [.useSoftwareRenderer: false])
+        let context = CIContext(options: [CIContextOption.useSoftwareRenderer: false])
         guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
             self.isProcessingFrame = false
             return
