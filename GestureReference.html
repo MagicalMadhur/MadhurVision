@@ -54,7 +54,7 @@
       background: var(--card); border: 1px solid var(--border);
       border-radius: 20px; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.5);
     }
-    .gesture-card img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+    .gesture-card img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; background: #000; }
     .gesture-card .card-body { padding: 24px 28px 28px; }
     .badge {
       display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
@@ -96,20 +96,20 @@
 <div class="cover">
   <div class="logo-ring">🥽</div>
   <h1>MadhurVision</h1>
-  <div class="subtitle">Gesture Reference Document — v1.0</div>
+  <div class="subtitle">Gesture & Input Reference Document — v2.0</div>
   <div class="divider"></div>
   <div class="cover-meta">
     <span><strong>Platform</strong>iOS Standalone VR</span>
     <span><strong>Device</strong>VR BOX Headset</span>
     <span><strong>Technology</strong>Apple Vision Framework</span>
-    <span><strong>Version</strong>1.0 · August 2026</span>
+    <span><strong>Version</strong>2.0 · August 2026</span>
   </div>
 </div>
 
 <div class="section-header">
-  <div class="tag">Active — v1.0</div>
-  <h2>Supported Gestures</h2>
-  <p>All gestures below are currently live in the MadhurVision iOS app (Standalone VR mode).</p>
+  <div class="tag">Active — v2.0</div>
+  <h2>Supported Gestures & Inputs</h2>
+  <p>All inputs below are fully active in the MadhurVision iOS app (Standalone VR mode).</p>
 </div>
 
 <div class="gesture-grid">
@@ -120,8 +120,8 @@
       <div class="badge badge-active">Active</div>
       <h3>Head Gaze</h3>
       <div class="action">👀 Look to Navigate</div>
-      <p>Simply look in any direction inside the VR BOX headset. The 3D world rotates with your head at 120Hz via the iPhone's built-in gyroscope and accelerometer. The crosshair stays fixed at the center of your vision.</p>
-      <div class="tech-note"><strong>Tech:</strong> CMMotionManager at 1/120s → SCNNode.eulerAngles updated every frame. No camera required.</div>
+      <p>Simply look in any direction inside the VR BOX headset. The 3D world rotates with your head at 120Hz via the iPhone's built-in gyroscope and accelerometer.</p>
+      <div class="tech-note"><strong>Tech:</strong> CMMotionManager at 1/120s → SCNNode.eulerAngles updated every frame.</div>
     </div>
   </div>
 
@@ -129,21 +129,32 @@
     <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_point_1787546774853.jpg" alt="Index Point"/>
     <div class="card-body">
       <div class="badge badge-active">Active</div>
-      <h3>Index Point</h3>
+      <h3>Index Point (2.5x Sensitivity)</h3>
       <div class="action">⚡ Aim the Virtual Cursor</div>
-      <p>Extend your index finger and point it toward the floating browser. A glowing cyan dot appears on the panel showing exactly where your finger aims.</p>
-      <div class="tech-note"><strong>Tech:</strong> VNHumanHandPoseObservation.indexTip → 3D raycast → SCNHitTest on browser plane.</div>
+      <p>Extend your index finger. A glowing dot appears on the panel. Thanks to the 2.5x sensitivity multiplier, small hand movements near the center of your view can reach the edges of the VR browser without exiting the camera's FOV.</p>
+      <div class="tech-note"><strong>Tech:</strong> VNHumanHandPoseObservation.indexTip → 3D raycast with 2.5x multiplier & 0.05 low-pass filter.</div>
     </div>
   </div>
 
   <div class="gesture-card">
-    <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_pinch_1787546738058.jpg" alt="Pinch"/>
+    <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_pinch_1787546738058.jpg" alt="Strict Pinch"/>
     <div class="card-body">
       <div class="badge badge-active">Active</div>
-      <h3>Pinch</h3>
+      <h3>Strict Pinch</h3>
       <div class="action">🖱️ Click / Tap</div>
-      <p>Bring your index fingertip and thumb tip together. This fires a click at the position your cursor is aiming at on the floating browser window.</p>
-      <div class="tech-note"><strong>Tech:</strong> indexTip–thumbTip distance &lt; 6% of frame. 500ms cooldown. JS: <code>element.click()</code></div>
+      <p>Bring your index fingertip and thumb tip together while keeping your <strong>middle and ring fingers explicitly straight</strong>. This fires a perfect JS mousedown/mouseup click at your cursor location.</p>
+      <div class="tech-note"><strong>Tech:</strong> pinchDist &lt; 0.05 && middleTip.y &gt; middleMCP.y. Fires native JS MouseEvents.</div>
+    </div>
+  </div>
+  
+  <div class="gesture-card">
+    <img src="" alt="Fist Clench" style="background:#223344; display:flex; align-items:center; justify-content:center; font-size:40px; color:#556677;">✊</img>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>Fist Clench</h3>
+      <div class="action">✊ Grab & Move Window</div>
+      <p>Make a closed fist (curl index, middle, and ring fingers). This locks onto the floating browser. Move your fist around to drag the entire YouTube window to a new location in 3D space.</p>
+      <div class="tech-note"><strong>Tech:</strong> All fingertips below MCP joints → offsets 3D node position with 2.5x tracking multiplier.</div>
     </div>
   </div>
 
@@ -153,8 +164,8 @@
       <div class="badge badge-active">Active</div>
       <h3>Palm Swipe Up</h3>
       <div class="action">⬆️ Scroll Up</div>
-      <p>Hold your palm open and move it upward. The floating browser scrolls up — like pulling a web page upward with your finger on a touchscreen.</p>
-      <div class="tech-note"><strong>Tech:</strong> Wrist landmark Y-delta between frames. Threshold: Δy &gt; 0.5%. JS: <code>window.scrollBy(0, -delta)</code></div>
+      <p>Hold your palm open and move it upward to scroll the browser upward.</p>
+      <div class="tech-note"><strong>Tech:</strong> Wrist landmark Y-delta. JS: <code>window.scrollBy(0, -delta)</code></div>
     </div>
   </div>
 
@@ -164,8 +175,30 @@
       <div class="badge badge-active">Active</div>
       <h3>Palm Swipe Down</h3>
       <div class="action">⬇️ Scroll Down</div>
-      <p>Hold your palm open and move it downward. The floating browser scrolls down to reveal more content below — more YouTube videos, longer articles, etc.</p>
-      <div class="tech-note"><strong>Tech:</strong> Same wrist Y-delta, negative direction. JS: <code>window.scrollBy(0, +delta)</code></div>
+      <p>Hold your palm open and move it downward to scroll the browser down.</p>
+      <div class="tech-note"><strong>Tech:</strong> Wrist Y-delta, negative direction. JS: <code>window.scrollBy(0, +delta)</code></div>
+    </div>
+  </div>
+  
+  <div class="gesture-card">
+    <img src="" alt="VR Air Keyboard" style="background:#223344; display:flex; align-items:center; justify-content:center; font-size:40px; color:#556677;">⌨️</img>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>VR Air Keyboard</h3>
+      <div class="action">⌨️ Type in Browser</div>
+      <p>When you click on any text input (e.g., YouTube search), a beautiful frosted-glass virtual keyboard slides up. Pinch the keys to type!</p>
+      <div class="tech-note"><strong>Tech:</strong> DOM Injection via WKUserScript. Dispatches JS Input events seamlessly.</div>
+    </div>
+  </div>
+  
+  <div class="gesture-card">
+    <img src="" alt="Bluetooth Mouse" style="background:#223344; display:flex; align-items:center; justify-content:center; font-size:40px; color:#556677;">🖱️</img>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>Bluetooth Mouse (Native & AssistiveTouch)</h3>
+      <div class="action">🖱️ Backup Controller</div>
+      <p>Connect a mouse! If using Native iOS 14+ Mouse, the iOS pointer hides and a 3D Windows pointer appears. If using AssistiveTouch, simply use the round cursor to click the screen to trigger 3D raycasts.</p>
+      <div class="tech-note"><strong>Tech:</strong> UIPanGestureRecognizer (indirectPointer) + Screen Tap Fallbacks.</div>
     </div>
   </div>
 
@@ -195,12 +228,6 @@
         <td>Phase 2</td>
       </tr>
       <tr>
-        <td>Fist Clench</td>
-        <td>Grab &amp; Move Window</td>
-        <td>All fingertips below MCP joints → track wrist delta to move 3D node</td>
-        <td>Phase 2</td>
-      </tr>
-      <tr>
         <td>Thumbs Up 👍</td>
         <td>Like / Confirm</td>
         <td>Thumb extended upward, all other fingers curled</td>
@@ -218,18 +245,12 @@
         <td>Index + middle finger extended, others curled → spawn new VRBrowserNode</td>
         <td>Phase 3</td>
       </tr>
-      <tr>
-        <td>Air Keyboard</td>
-        <td>Type in Browser</td>
-        <td>Virtual QWERTY panel in scene; pinch on each key → JS keyboard events</td>
-        <td>Phase 4</td>
-      </tr>
     </tbody>
   </table>
 </div>
 
 <footer>
-  <strong>MadhurVision</strong> — Gesture Reference v1.0 &nbsp;·&nbsp;
+  <strong>MadhurVision</strong> — Gesture Reference v2.0 &nbsp;·&nbsp;
   Apple Vision Framework &nbsp;·&nbsp; iOS Standalone VR &nbsp;·&nbsp; August 2026
   <br/><br/>
   <span style="font-size:11px">To add a new gesture: implement in <code>HandTrackingManager.swift</code> → wire in <code>HandCursorNode.swift</code> → update this document.</span>
