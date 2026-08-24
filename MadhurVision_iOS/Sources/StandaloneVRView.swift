@@ -57,8 +57,14 @@ class DualEyeContainerView: UIView {
         super.init(frame: .zero)
         self.backgroundColor = .black
         
-        if let conn = cameraPreview.connection, conn.isVideoOrientationSupported {
-            conn.videoOrientation = .landscapeRight
+        DispatchQueue.main.async {
+            let orientation = UIApplication.shared.windows.first?.windowScene?.interfaceOrientation ?? .landscapeRight
+            let avOrientation: AVCaptureVideoOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
+            
+            if let conn = self.cameraPreview.connection, conn.isVideoOrientationSupported {
+                conn.videoOrientation = avOrientation
+            }
+            PassthroughManager.shared.updateOrientation(avOrientation)
         }
         
         replicatorLayer.addSublayer(cameraPreview)

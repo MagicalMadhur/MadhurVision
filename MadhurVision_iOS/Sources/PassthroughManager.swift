@@ -47,12 +47,6 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
             captureSession.addOutput(videoOutput)
         }
 
-        if let connection = videoOutput.connection(with: .video) {
-            if connection.isVideoOrientationSupported {
-                connection.videoOrientation = .landscapeRight
-            }
-        }
-
         captureSession.commitConfiguration()
 
         do {
@@ -82,3 +76,11 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
         HandTrackingManager.shared.processFrame(pixelBuffer)
     }
 }
+
+    func updateOrientation(_ orientation: AVCaptureVideoOrientation) {
+        if let connection = videoOutput.connection(with: .video) {
+            if connection.isVideoOrientationSupported {
+                connection.videoOrientation = orientation
+            }
+        }
+    }

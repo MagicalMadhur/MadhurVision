@@ -50,13 +50,26 @@ class HandTrackingManager: NSObject {
         guard isRunning, !isProcessingFrame else { return }
         isProcessingFrame = true
         
-        defer { isProcessingFrame = false }
+    private let processingQueue = DispatchQueue(label: "HandTrackingQueue", qos: .userInteractive)
+
+    /// Called by PassthroughManager with each camera frame
+    func processFrame(_ pixelBuffer: CVPixelBuffer) {
+        guard isRunning, !isProcessingFrame else { return }
+        isProcessingFrame = true
         
-        // Run synchronously so that AVCaptureVideoDataOutput waits for us to finish.
-        // Because `alwaysDiscardsLateVideoFrames = true`, it will perfectly regulate the framerate
-        // by dropping frames while Vision is busy, guaranteeing 100% memory safety (no freed buffer access).
-        autoreleasepool {
-            self.runVision(on: pixelBuffer)
+        // Deep copy the pixel buffer synchronously before returning, so the camera hardware can 
+        // immediately recycle the original buffer. This prevents EX_BAD_ACCESS (memory corruption)
+        // AND prevents OS Watchdog timeouts (which happen if we block the camera queue too long).
+        guard let copiedBuffer = pixelBuffer.deepCopy() else {
+            isProcessingFrame = false
+            return
+        }
+        
+        processingQueue.async { [weak self] in
+            autoreleasepool {
+                defer { self?.isProcessingFrame = false }
+                self?.runVision(on: copiedBuffer)
+            }
         }
     }
 
@@ -142,5 +155,46 @@ class HandTrackingManager: NSObject {
                 }
             }
         }
+    }
+}
+
+extension CVPixelBuffer {
+    func deepCopy() -> CVPixelBuffer? {
+        let width = CVPixelBufferGetWidth(self)
+        let height = CVPixelBufferGetHeight(self)
+        let format = CVPixelBufferGetPixelFormatType(self)
+        
+        var copy: CVPixelBuffer?
+        let options: [String: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+        ]
+        
+        let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, format, options as CFDictionary, &copy)
+        guard status == kCVReturnSuccess, let dest = copy else { return nil }
+        
+        CVPixelBufferLockBaseAddress(self, .readOnly)
+        CVPixelBufferLockBaseAddress(dest, [])
+        
+        defer {
+            CVPixelBufferUnlockBaseAddress(dest, [])
+            CVPixelBufferUnlockBaseAddress(self, .readOnly)
+        }
+        
+        guard let srcBase = CVPixelBufferGetBaseAddress(self),
+              let destBase = CVPixelBufferGetBaseAddress(dest) else { return nil }
+        
+        let srcBytesPerRow = CVPixelBufferGetBytesPerRow(self)
+        let destBytesPerRow = CVPixelBufferGetBytesPerRow(dest)
+        
+        if srcBytesPerRow == destBytesPerRow {
+            memcpy(destBase, srcBase, height * srcBytesPerRow)
+        } else {
+            for y in 0..<height {
+                memcpy(destBase.advanced(by: y * destBytesPerRow), srcBase.advanced(by: y * srcBytesPerRow), min(srcBytesPerRow, destBytesPerRow))
+            }
+        }
+        
+        return dest
     }
 }
