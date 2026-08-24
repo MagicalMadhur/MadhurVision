@@ -3,6 +3,10 @@ import Combine
 
 @main
 struct MadhurVisionApp: App {
+    init() {
+        AppLogger.shared.setupCrashHandlers()
+    }
+    
     var body: some Scene {
         WindowGroup {
             HomeView()
