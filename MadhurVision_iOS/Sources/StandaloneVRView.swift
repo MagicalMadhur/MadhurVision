@@ -40,24 +40,25 @@ class DualEyeContainerView: UIView {
     let leftView: SCNView
     let rightView: SCNView
     
-    // Hardware-accelerated GPU passthrough
-    private let cameraPreview: AVCaptureVideoPreviewLayer
-    private let replicatorLayer: CAReplicatorLayer
+    // Two display layers consume the same capture session. CAReplicatorLayer
+    // is unreliable with AVCaptureVideoPreviewLayer on some devices, where it
+    // can display only its replicated (right-eye) instance.
+    private let leftCameraPreview: AVCaptureVideoPreviewLayer
+    private let rightCameraPreview: AVCaptureVideoPreviewLayer
     
     init(leftView: SCNView, rightView: SCNView) {
         self.leftView = leftView
         self.rightView = rightView
         
-        cameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
-        cameraPreview.videoGravity = .resizeAspectFill
-        
-        replicatorLayer = CAReplicatorLayer()
-        replicatorLayer.instanceCount = 2
+        leftCameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
+        rightCameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
+        leftCameraPreview.videoGravity = .resizeAspectFill
+        rightCameraPreview.videoGravity = .resizeAspectFill
         
         super.init(frame: .zero)
         self.backgroundColor = .black
-        replicatorLayer.addSublayer(cameraPreview)
-        self.layer.addSublayer(replicatorLayer)
+        self.layer.addSublayer(leftCameraPreview)
+        self.layer.addSublayer(rightCameraPreview)
         
         self.addSubview(leftView)
         self.addSubview(rightView)
@@ -71,16 +72,17 @@ class DualEyeContainerView: UIView {
         let orientation = UIApplication.shared.windows.first?.windowScene?.interfaceOrientation ?? .landscapeRight
         let avOrientation: AVCaptureVideoOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
         
-        if let conn = self.cameraPreview.connection, conn.isVideoOrientationSupported {
-            conn.videoOrientation = avOrientation
+        for preview in [leftCameraPreview, rightCameraPreview] {
+            if let connection = preview.connection, connection.isVideoOrientationSupported {
+                connection.videoOrientation = avOrientation
+            }
         }
         PassthroughManager.shared.updateOrientation(avOrientation)
         
         let halfWidth = bounds.width / 2.0
         
-        cameraPreview.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
-        replicatorLayer.frame = bounds
-        replicatorLayer.instanceTransform = CATransform3DMakeTranslation(halfWidth, 0, 0)
+        leftCameraPreview.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
+        rightCameraPreview.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
         
         leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
         rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
@@ -97,10 +99,10 @@ struct DualEyeVRContainer: UIViewRepresentable {
         leftView.preferredFramesPerSecond = 120
         leftView.isPlaying = true
         leftView.loops = true
-        // This is the sole authority that mutates the shared scene. The right
-        // eye renders the same scene but never runs a second update callback.
         leftView.delegate = vrEngine
         leftView.backgroundColor = .clear
+        leftView.isOpaque = false
+        leftView.layer.isOpaque = false
         leftView.antialiasingMode = .multisampling2X
         
         let rightView = SCNView()
@@ -109,7 +111,10 @@ struct DualEyeVRContainer: UIViewRepresentable {
         rightView.preferredFramesPerSecond = 120
         rightView.isPlaying = true
         rightView.loops = true
+        rightView.delegate = vrEngine
         rightView.backgroundColor = .clear
+        rightView.isOpaque = false
+        rightView.layer.isOpaque = false
         rightView.antialiasingMode = .multisampling2X
         
         let container = DualEyeContainerView(leftView: leftView, rightView: rightView)
@@ -191,6 +196,13 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         var passthroughBackground: UIColor?
         var directTap: DirectTap?
         var monitorImage: UIImage?
+        var resetMonitor = false
+
+        var hasWork: Bool {
+            hand != nil || mouse != nil || headRotation != nil || monitorScale != nil ||
+            ipd != nil || shouldRecalibrate || passthroughBackground != nil ||
+            directTap != nil || monitorImage != nil || resetMonitor
+        }
     }
 
     private struct MouseTrackingInput {
@@ -207,6 +219,7 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
 
     private let pendingInputLock = NSLock()
     private var pendingInput = PendingSceneInput()
+    private let sceneUpdateLock = NSLock()
     
     // Monitor distance in front of user
     private let monitorDistance: Float = -2.0
@@ -462,6 +475,8 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     // Grab State
     private var isCurrentlyGrabbing = false
     private var grabOffset: SCNVector3 = SCNVector3Zero
+    private var grabStartPalmSpan: CGFloat = 0
+    private var grabStartDistance: Float = 2.0
     
     // MARK: - Tracking & Gestures
     
@@ -493,17 +508,24 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         ht.$latestInput
             .receive(on: RunLoop.main)
             .sink { [weak self] input in
-                self?.enqueueSceneInput { $0.hand = input }
+                self?.enqueueSceneInput {
+                    $0.hand = input
+                    $0.resetMonitor = $0.resetMonitor || input.resetRequested
+                }
             }
             .store(in: &cancellables)
     }
 
     // MARK: - SceneKit Render Loop
 
-    /// The left SCNView is the only view assigned this delegate. This method
-    /// is the sole runtime owner of scene graph reads and writes after setup.
+    /// Both eyes can call this, but a lock ensures one render callback at a
+    /// time consumes and applies the queued scene work.
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        sceneUpdateLock.lock()
+        defer { sceneUpdateLock.unlock() }
+
         let input = takePendingSceneInput()
+        guard input.hasWork else { return }
 
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0
@@ -542,7 +564,9 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
             applyDirectScreenTap(tap)
         }
 
-        if let hand = input.hand {
+        if input.resetMonitor {
+            resetMonitorToHome()
+        } else if let hand = input.hand {
             applyHandInput(hand)
         }
 
@@ -596,11 +620,24 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
             let sensitivity: Float = 2.5
             let ndcX = Float(input.grabPosition.x * 2.0 - 1.0) * sensitivity
             let ndcY = Float(input.grabPosition.y * 2.0 - 1.0) * sensitivity
-            let localPoint = SCNVector3(ndcX * 2.5, -ndcY * 2.5, monitorDistance)
+
+            let isNewGrab = !isCurrentlyGrabbing
+            if isNewGrab {
+                isCurrentlyGrabbing = true
+                grabStartPalmSpan = max(input.palmSpan, 0.001)
+                let monitorInCameraSpace = leftCameraNode.convertPosition(monitor.worldPosition, from: nil)
+                grabStartDistance = max(-monitorInCameraSpace.z, 0.6)
+            }
+
+            // A larger apparent palm means the fist is closer to the camera.
+            // Move the panel forward/backward like a projector rather than
+            // scaling it, so its physical proportions and orientation remain stable.
+            let depthRatio = Float(grabStartPalmSpan / max(input.palmSpan, 0.001))
+            let targetDistance = min(max(grabStartDistance * depthRatio, 0.6), 4.5)
+            let localPoint = SCNVector3(ndcX * 2.5, -ndcY * 2.5, -targetDistance)
             let worldPoint = leftCameraNode.convertPosition(localPoint, to: nil)
 
-            if !isCurrentlyGrabbing {
-                isCurrentlyGrabbing = true
+            if isNewGrab {
                 grabOffset = SCNVector3(
                     monitor.position.x - worldPoint.x,
                     monitor.position.y - worldPoint.y,
@@ -616,11 +653,11 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
             monitor.position.x += (target.x - monitor.position.x) * 0.15
             monitor.position.y += (target.y - monitor.position.y) * 0.15
             monitor.position.z += (target.z - monitor.position.z) * 0.15
-            monitor.eulerAngles = SCNVector3(0, cameraRig.eulerAngles.y, 0)
             return
         }
 
         isCurrentlyGrabbing = false
+        grabOffset = SCNVector3Zero
         handCursor?.update(
             fingerPos: input.indexTipPosition,
             cameraNode: leftCameraNode,
@@ -628,5 +665,27 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
             isPinching: input.isPinching,
             scrollDelta: input.scrollDelta
         )
+    }
+
+    private func resetMonitorToHome() {
+        guard let monitor = monitorNode else { return }
+
+        // Anchor the default panel in front of the user's current gaze, while
+        // keeping it upright rather than inheriting head pitch or roll.
+        let homeInHeadSpace = SCNVector3(0, 0.05, monitorDistance)
+        monitor.worldPosition = cameraRig.convertPosition(homeInHeadSpace, to: nil)
+        monitor.eulerAngles = SCNVector3(0, cameraRig.eulerAngles.y, 0)
+        monitor.scale = SCNVector3(1, 1, 1)
+
+        isCurrentlyGrabbing = false
+        grabOffset = SCNVector3Zero
+        grabStartPalmSpan = 0
+        grabStartDistance = -monitorDistance
+
+        // WebKit and ObservableObject changes belong to the main thread.
+        DispatchQueue.main.async { [weak self, weak monitor] in
+            self?.monitorScale = 1.0
+            monitor?.goHome()
+        }
     }
 }

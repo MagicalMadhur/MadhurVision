@@ -12,13 +12,19 @@ struct HandTrackingInput {
     let scrollDelta: CGFloat
     let isGrabbing: Bool
     let grabPosition: CGPoint
+    /// Apparent palm size used as a single-camera proxy for moving closer/farther.
+    let palmSpan: CGFloat
+    /// A one-shot open-palm command that restores the VR monitor.
+    let resetRequested: Bool
 
     static let noHand = HandTrackingInput(
         indexTipPosition: .zero,
         isPinching: false,
         scrollDelta: 0,
         isGrabbing: false,
-        grabPosition: .zero
+        grabPosition: .zero,
+        palmSpan: 0,
+        resetRequested: false
     )
 }
 
@@ -47,6 +53,7 @@ class HandTrackingManager: NSObject {
     // Tracking state
     private var previousPalmY: CGFloat? = nil
     private var pinchCooldown = false
+    private var resetCooldown = false
     private var isRunning = false
 
     // Frame processing mutex
@@ -150,25 +157,81 @@ class HandTrackingManager: NSObject {
               let thumbTip  = try? observation.recognizedPoint(.thumbTip),
               let wrist     = try? observation.recognizedPoint(.wrist),
               indexTip.confidence > 0.5,
-              thumbTip.confidence > 0.5 else { return }
+              thumbTip.confidence > 0.5,
+              wrist.confidence > 0.5 else { return }
+
+        // The little finger completes the fist test. It is optional only so a
+        // temporarily occluded little finger can never turn a partial gesture
+        // into a grab.
+        let littleTip = try? observation.recognizedPoint(.littleTip)
+        let littleMCP = try? observation.recognizedPoint(.littleMCP)
 
         let indexPos = CGPoint(x: indexTip.location.x,
                                y: 1.0 - indexTip.location.y)
         let thumbPos = CGPoint(x: thumbTip.location.x,
                                y: 1.0 - thumbTip.location.y)
 
-        // Pinch detection: Index and thumb close, and middle/ring explicitly straight
-        let middleStraight = middleTip.location.y > middleMCP.location.y
-        let ringStraight = ringTip.location.y > ringMCP.location.y
+        func distance(_ first: VNRecognizedPoint, _ second: VNRecognizedPoint) -> CGFloat {
+            hypot(first.location.x - second.location.x, first.location.y - second.location.y)
+        }
+
+        // Finger extension is measured relative to the wrist instead of using
+        // only vertical screen coordinates. The former still works when the
+        // user points sideways, which was the source of false fist detections.
+        func isExtended(_ tip: VNRecognizedPoint, _ knuckle: VNRecognizedPoint) -> Bool {
+            guard tip.confidence > 0.5, knuckle.confidence > 0.3 else { return false }
+            return distance(tip, wrist) > distance(knuckle, wrist) * 1.25
+        }
+
+        func isCurled(_ tip: VNRecognizedPoint, _ knuckle: VNRecognizedPoint) -> Bool {
+            guard tip.confidence > 0.5, knuckle.confidence > 0.3 else { return false }
+            return distance(tip, wrist) <= distance(knuckle, wrist) * 1.15
+        }
+
+        let indexExtended = isExtended(indexTip, indexMCP)
+        let middleExtended = isExtended(middleTip, middleMCP)
+        let ringExtended = isExtended(ringTip, ringMCP)
+        let middleCurled = isCurled(middleTip, middleMCP)
+        let ringCurled = isCurled(ringTip, ringMCP)
+        let littleCurled: Bool
+        let thumbFolded: Bool
+        let littleExtended: Bool
+        let thumbExtended: Bool
+        if let littleTip, let littleMCP {
+            littleCurled = isCurled(littleTip, littleMCP)
+            littleExtended = isExtended(littleTip, littleMCP)
+            // Normalize the thumb position by the palm width so a thumbs-up
+            // or open thumb cannot count as a closed fist.
+            let palmWidth = max(distance(indexMCP, littleMCP), 0.01)
+            thumbFolded = distance(thumbTip, indexMCP) <= palmWidth * 1.5
+            thumbExtended = distance(thumbTip, wrist) > palmWidth * 1.2
+        } else {
+            littleCurled = false
+            littleExtended = false
+            thumbFolded = false
+            thumbExtended = false
+        }
+
+        // A cursor is available only for an intentional one-finger point:
+        // index extended, all other fingers curled.
+        let isPointing = indexExtended && middleCurled && ringCurled && littleCurled
+
+        // A window grab needs a real closed fist. A partly open hand, an
+        // incomplete pinch, or a sideways point cannot satisfy this test.
+        let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
+
+        // An open palm is deliberately unused by the pointer and grab modes,
+        // making it a reliable one-hand reset gesture.
+        let isOpenPalm = indexExtended && middleExtended && ringExtended && littleExtended && thumbExtended
+
+        // Pinch detection is evaluated only while pointing. Leaving a gap
+        // between thumb and index therefore stays in pointer mode.
         let pinchDist = hypot(indexPos.x - thumbPos.x, indexPos.y - thumbPos.y)
-        let pinchDetected = pinchDist < 0.05 && middleStraight && ringStraight
-        
-        // Fist / Grab detection (all fingers curled)
-        let isFist = (indexTip.location.y < indexMCP.location.y) &&
-                     (middleTip.location.y < middleMCP.location.y) &&
-                     (ringTip.location.y < ringMCP.location.y)
+        let pinchDetected = isPointing && pinchDist < 0.05
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
+        let cursorPosition = isPointing ? indexPos : .zero
+        let palmSpan = distance(indexMCP, wrist)
 
         // Scroll detection (only when NOT grabbing)
         let palmY = 1.0 - wrist.location.y
@@ -180,10 +243,18 @@ class HandTrackingManager: NSObject {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isTracking else { return }
-            self.indexTipPosition = indexPos
+            self.indexTipPosition = cursorPosition
             self.scrollDelta = scrollD
             self.isGrabbing = isFist
             self.grabPosition = wristPos
+
+            let resetRequested = isOpenPalm && !self.resetCooldown
+            if resetRequested {
+                self.resetCooldown = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.resetCooldown = false
+                }
+            }
 
             if pinchDetected && !self.pinchCooldown && !isFist {
                 self.isPinching = true
@@ -197,7 +268,9 @@ class HandTrackingManager: NSObject {
                         isPinching: false,
                         scrollDelta: 0,
                         isGrabbing: self.isGrabbing,
-                        grabPosition: self.grabPosition
+                        grabPosition: self.grabPosition,
+                        palmSpan: palmSpan,
+                        resetRequested: false
                     )
                 }
                 
@@ -208,11 +281,13 @@ class HandTrackingManager: NSObject {
             }
 
             self.latestInput = HandTrackingInput(
-                indexTipPosition: indexPos,
+                indexTipPosition: cursorPosition,
                 isPinching: self.isPinching,
                 scrollDelta: scrollD,
                 isGrabbing: isFist,
-                grabPosition: wristPos
+                grabPosition: wristPos,
+                palmSpan: palmSpan,
+                resetRequested: resetRequested
             )
         }
     }
