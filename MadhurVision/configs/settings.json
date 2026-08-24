@@ -8,14 +8,14 @@
     "vr_enabled": true
   },
   "camera": {
-    "source": "webrtc",
+    "source": "native",
     "local_camera_index": 0,
     "resolution": [
       1920,
       1080
     ],
     "fps": 30,
-    "mirror": true
+    "mirror": false
   },
   "network": {
     "server_host": "0.0.0.0",

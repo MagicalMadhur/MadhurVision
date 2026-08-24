@@ -78,7 +78,7 @@ Examples:
         help="Rendering mode (default: desktop)"
     )
     parser.add_argument(
-        "--camera", choices=["local", "webrtc"],
+        "--camera", choices=["local", "webrtc", "native"],
         default="local",
         help="Camera source (default: local webcam)"
     )

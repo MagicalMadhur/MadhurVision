@@ -1,5 +1,6 @@
 import SceneKit
 import WebKit
+import UIKit
 
 class VRBrowserNode: SCNNode {
     private var webView: WKWebView!
@@ -9,11 +10,11 @@ class VRBrowserNode: SCNNode {
         
         // 1. Create the physical 3D plane
         let plane = SCNPlane(width: width, height: height)
-        
-        // Curve the screen slightly for immersion (optional advanced SceneKit step)
-        // For now, flat plane.
-        
+        plane.cornerRadius = 0.05  // Rounded corners like a real floating panel
         self.geometry = plane
+        
+        // Add a glowing border frame around the browser (Meta Quest-style panel border)
+        addBorderFrame(width: width, height: height)
         
         // 2. Initialize the Web View
         // We use a high resolution mapping. The aspect ratio must match the plane.
@@ -67,5 +68,31 @@ class VRBrowserNode: SCNNode {
             }
         """
         webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+    
+    // Scroll the browser page by a normalized delta (-1 to 1)
+    func simulateScroll(by delta: CGFloat) {
+        let pixels = delta * 800  // scale to pixels
+        let js = "window.scrollBy(0, \(pixels));"
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+    
+    // MARK: - Visual Polish
+    
+    private func addBorderFrame(width: CGFloat, height: CGFloat) {
+        // Thin border plane slightly behind the main browser plane
+        let borderPlane = SCNPlane(width: width + 0.04, height: height + 0.04)
+        borderPlane.cornerRadius = 0.06
+        
+        let borderMaterial = SCNMaterial()
+        borderMaterial.diffuse.contents  = UIColor.white.withAlphaComponent(0.15)
+        borderMaterial.emission.contents = UIColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 0.6)  // Cyan glow
+        borderMaterial.lightingModel = .constant
+        borderMaterial.isDoubleSided = true
+        borderPlane.materials = [borderMaterial]
+        
+        let borderNode = SCNNode(geometry: borderPlane)
+        borderNode.position = SCNVector3(0, 0, -0.002)  // Slightly behind
+        addChildNode(borderNode)
     }
 }
