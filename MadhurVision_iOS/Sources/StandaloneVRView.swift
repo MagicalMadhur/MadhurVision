@@ -93,11 +93,16 @@ struct DualEyeVRContainer: UIViewRepresentable {
     let vrEngine: VREngine
     
     func makeUIView(context: Context) -> DualEyeContainerView {
+        // Both preview layers must be created after the capture input exists.
+        // Otherwise one eye can end up with no AVCapture connection at all.
+        _ = PassthroughManager.shared.prepare()
+
         let leftView = SCNView()
         leftView.scene = vrEngine.scene
         leftView.pointOfView = vrEngine.leftCameraNode
         leftView.preferredFramesPerSecond = 120
         leftView.isPlaying = true
+        leftView.rendersContinuously = true
         leftView.loops = true
         leftView.delegate = vrEngine
         leftView.backgroundColor = .clear
@@ -110,6 +115,7 @@ struct DualEyeVRContainer: UIViewRepresentable {
         rightView.pointOfView = vrEngine.rightCameraNode
         rightView.preferredFramesPerSecond = 120
         rightView.isPlaying = true
+        rightView.rendersContinuously = true
         rightView.loops = true
         rightView.delegate = vrEngine
         rightView.backgroundColor = .clear
@@ -518,6 +524,10 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
 
     // MARK: - SceneKit Render Loop
 
+    // State latched for 120Hz continuous evaluation
+    private var latestHandInput: HandTrackingInput?
+    private var latestMouseInput: MouseTrackingInput?
+
     /// Both eyes can call this, but a lock ensures one render callback at a
     /// time consumes and applies the queued scene work.
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
@@ -525,7 +535,9 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         defer { sceneUpdateLock.unlock() }
 
         let input = takePendingSceneInput()
-        guard input.hasWork else { return }
+        
+        if let h = input.hand { latestHandInput = h }
+        if let m = input.mouse { latestMouseInput = m }
 
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0
@@ -566,11 +578,11 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
 
         if input.resetMonitor {
             resetMonitorToHome()
-        } else if let hand = input.hand {
+        } else if let hand = latestHandInput {
             applyHandInput(hand)
         }
 
-        if let mouse = input.mouse, mouse.isActive {
+        if let mouse = latestMouseInput, mouse.isActive {
             mouseCursor?.update(
                 virtualPosition: mouse.position,
                 cameraNode: leftCameraNode,
