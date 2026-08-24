@@ -17,8 +17,6 @@ class HandTrackingManager: NSObject {
     @Published var isGrabbing: Bool = false
     @Published var grabPosition: CGPoint = .zero
 
-    private let processingQueue = DispatchQueue(label: "HandTrackingQueue", qos: .userInteractive)
-
     // Vision request
     private lazy var handPoseRequest: VNDetectHumanHandPoseRequest = {
         let request = VNDetectHumanHandPoseRequest()
@@ -33,9 +31,6 @@ class HandTrackingManager: NSObject {
 
     // Frame processing mutex
     private var isProcessingFrame = false
-
-    // Shared CIContext to avoid OOM allocations per frame
-    private let ciContext = CIContext(options: [CIContextOption.useSoftwareRenderer: false])
 
     private override init() {
         super.init()
@@ -55,25 +50,18 @@ class HandTrackingManager: NSObject {
         guard isRunning, !isProcessingFrame else { return }
         isProcessingFrame = true
         
-        // CVPixelBuffer memory is owned by the camera hardware's IOSurface pool.
-        // It can be overwritten at any time, causing EX_BAD_ACCESS in Vision.
-        // We must synchronously lock it or copy it. Creating a CGImage forces a safe memory copy!
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
-            self.isProcessingFrame = false
-            return
-        }
+        defer { isProcessingFrame = false }
         
-        processingQueue.async { [weak self] in
-            autoreleasepool {
-                defer { self?.isProcessingFrame = false }
-                self?.runVision(on: cgImage)
-            }
+        // Run synchronously so that AVCaptureVideoDataOutput waits for us to finish.
+        // Because `alwaysDiscardsLateVideoFrames = true`, it will perfectly regulate the framerate
+        // by dropping frames while Vision is busy, guaranteeing 100% memory safety (no freed buffer access).
+        autoreleasepool {
+            self.runVision(on: pixelBuffer)
         }
     }
 
-    private func runVision(on image: CGImage) {
-        let handler = VNImageRequestHandler(cgImage: image, orientation: .up, options: [:])
+    private func runVision(on pixelBuffer: CVPixelBuffer) {
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         do {
             try handler.perform([handPoseRequest])
         } catch {
