@@ -10,11 +10,12 @@ import UIKit
 /// - Projector-style scaling that maintains fixed 16:9 web resolution.
 class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     
-    // Callbacks to VREngine for settings
+    // Public Callbacks
     var onScaleChanged: ((CGFloat) -> Void)?
     var onIPDChanged: ((Float) -> Void)?
     var onRecalibrateRequested: (() -> Void)?
     var onPassthroughToggled: ((Bool) -> Void)?
+    var onExitVRRequested: (() -> Void)?
     
     private var webView: WKWebView!
     private let monitorWidth: CGFloat
@@ -295,6 +296,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             if let enabled = body["enabled"] as? Bool {
                 onPassthroughToggled?(enabled)
             }
+        case "exitVR":
+            onExitVRRequested?()
         default:
             break
         }

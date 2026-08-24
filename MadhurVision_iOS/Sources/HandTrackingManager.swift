@@ -30,13 +30,15 @@ class HandTrackingManager: NSObject {
     private var pinchCooldown = false
     private var isRunning = false
 
+    // Frame processing mutex
+    private var isProcessingFrame = false
+
     private override init() {
         super.init()
     }
 
     func start() {
         isRunning = true
-        // No camera session — PassthroughManager feeds us frames
     }
 
     func stop() {
@@ -46,17 +48,25 @@ class HandTrackingManager: NSObject {
 
     /// Called by PassthroughManager with each camera frame
     func processFrame(_ pixelBuffer: CVPixelBuffer) {
-        guard isRunning else { return }
+        guard isRunning, !isProcessingFrame else { return }
+        isProcessingFrame = true
+
+        // Capture immutable CGImage synchronously to avoid CVPixelBuffer mutation crashes
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+            self.isProcessingFrame = false
+            return
+        }
 
         processingQueue.async { [weak self] in
-            self?.runVision(on: pixelBuffer)
+            defer { self?.isProcessingFrame = false }
+            self?.runVision(on: cgImage)
         }
     }
 
-    private func runVision(on pixelBuffer: CVPixelBuffer) {
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
-                                            orientation: .up,
-                                            options: [:])
+    private func runVision(on image: CGImage) {
+        let handler = VNImageRequestHandler(cgImage: image, orientation: .up, options: [:])
         do {
             try handler.perform([handPoseRequest])
         } catch {

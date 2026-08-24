@@ -15,62 +15,6 @@ struct StandaloneVRView: View {
             DualEyeVRContainer(vrEngine: vrEngine)
                 .ignoresSafeArea()
             
-            // Top HUD Controls
-            VStack {
-                HStack(spacing: 14) {
-                    // Exit button
-                    Button(action: {
-                        vrEngine.stop()
-                        appState.currentMode = .home
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    
-                    Spacer()
-                    
-                    // Recalibrate Center View Button
-                    Button(action: { vrEngine.recalibrateView() }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "scope")
-                            Text("Center View")
-                        }
-                        .font(.system(size: 13, weight: .bold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Color.black.opacity(0.6))
-                        .foregroundColor(.cyan)
-                        .cornerRadius(10)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.cyan.opacity(0.5), lineWidth: 1)
-                        )
-                    }
-                    
-                    // Window scale controls
-                    Button(action: { vrEngine.scaleMonitor(by: -0.15) }) {
-                        Image(systemName: "minus.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    
-                    Text(String(format: "%.0f%%", vrEngine.monitorScale * 100))
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(.cyan)
-                    
-                    Button(action: { vrEngine.scaleMonitor(by: 0.15) }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 12)
-                
-                Spacer()
-            }
-            
             // Dual Centered Crosshairs
             HStack(spacing: 0) {
                 Crosshair().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -78,7 +22,12 @@ struct StandaloneVRView: View {
             }
             .allowsHitTesting(false)
         }
-        .onAppear { vrEngine.start() }
+        .onAppear {
+            vrEngine.onExit = {
+                appState.currentMode = .home
+            }
+            vrEngine.start()
+        }
         .onDisappear { vrEngine.stop() }
         .statusBarHidden(true)
     }
@@ -185,6 +134,7 @@ class VREngine: ObservableObject {
     let rightCameraNode = SCNNode()
     
     @Published var monitorScale: CGFloat = 1.0
+    var onExit: (() -> Void)?
     
     private let cameraRig   = SCNNode()
     private let motionManager = CMMotionManager()
@@ -359,6 +309,13 @@ class VREngine: ObservableObject {
         }
         monitor.onPassthroughToggled = { [weak self] enabled in
             self?.setPassthrough(enabled: enabled)
+        }
+        monitor.onExitVRRequested = { [weak self] in
+            guard let self = self else { return }
+            self.stop()
+            DispatchQueue.main.async {
+                self.onExit?()
+            }
         }
         
         // Position directly in front at eye level (Z = -2.0m)
