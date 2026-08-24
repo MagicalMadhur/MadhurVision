@@ -229,6 +229,7 @@ class VREngine: ObservableObject {
     func setPassthrough(enabled: Bool) {
         if enabled {
             PassthroughManager.shared.start(scene: scene)
+            scene.background.contents = UIColor.clear
         } else {
             PassthroughManager.shared.stop()
             scene.background.contents = UIColor(red: 0.02, green: 0.03, blue: 0.07, alpha: 1.0)
@@ -288,7 +289,7 @@ class VREngine: ObservableObject {
     // MARK: - Scene Setup
     
     private func setupScene() {
-        scene.background.contents = UIColor(red: 0.02, green: 0.03, blue: 0.07, alpha: 1.0)
+        scene.background.contents = UIColor.clear
         
         let ambient = SCNNode()
         ambient.light = SCNLight()
