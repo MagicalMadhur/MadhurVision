@@ -25,22 +25,22 @@ class VRBrowserNode: SCNNode {
         webConfig.allowsInlineMediaPlayback = true
         webConfig.mediaTypesRequiringUserActionForPlayback = []
         
-        // Force Desktop mode so YouTube doesn't load the broken mobile site at 2000px wide
-        let prefs = WKWebpagePreferences()
-        prefs.preferredContentMode = .desktop
-        webConfig.defaultWebpagePreferences = prefs
-        
         // Inject Air Keyboard
         let keyboardJS = VRBrowserNode.airKeyboardScript()
         let userScript = WKUserScript(source: keyboardJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         webConfig.userContentController.addUserScript(userScript)
         
+        // Apply styling to hide scrollbars
+        let hideScrollbarJS = "var style = document.createElement('style'); style.innerHTML = '::-webkit-scrollbar { display: none; }'; document.head.appendChild(style);"
+        let scrollUserScript = WKUserScript(source: hideScrollbarJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        webConfig.userContentController.addUserScript(scrollUserScript)
+        
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: webWidth, height: webHeight), configuration: webConfig)
         webView.isOpaque = false
         webView.backgroundColor = .clear
         
-        // Spoof Mac Safari User-Agent to guarantee desktop site delivery
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15"
+        // Spoof iPad User-Agent: gives desktop-class layout but properly handles viewport scaling and touch/mouse logic!
+        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
         
         // 3. Map the WebView's CoreAnimation Layer to the SceneKit Material
         let material = SCNMaterial()
@@ -82,7 +82,7 @@ class VRBrowserNode: SCNNode {
         webView = nil
     }
     
-    // In Phase 2, this function will be called by a raycast hit to simulate a click
+    // Simulate a mouse click at the given UV coordinate (0-1)
     func simulateClick(at uv: CGPoint) {
         let x = uv.x * webView.bounds.width
         let y = uv.y * webView.bounds.height
@@ -90,8 +90,8 @@ class VRBrowserNode: SCNNode {
         let js = """
             var el = document.elementFromPoint(\(x), \(y));
             if(el) {
-                var down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y) });
-                var up = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y) });
+                var down = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y), pointerType: 'touch' });
+                var up = new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y), pointerType: 'touch' });
                 var click = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y) });
                 
                 el.dispatchEvent(down);
