@@ -14,7 +14,7 @@ class HandTrackingManager: NSObject {
     @Published var isPinching: Bool = false
     @Published var scrollDelta: CGFloat = 0.0
     @Published var isGrabbing: Bool = false
-    @Published var grabDelta: CGPoint = .zero
+    @Published var grabPosition: CGPoint = .zero
 
     private let processingQueue = DispatchQueue(label: "HandTrackingQueue", qos: .userInteractive)
 
@@ -27,7 +27,6 @@ class HandTrackingManager: NSObject {
 
     // Tracking state
     private var previousPalmY: CGFloat? = nil
-    private var previousGrabPos: CGPoint? = nil
     private var pinchCooldown = false
     private var isRunning = false
 
@@ -43,7 +42,6 @@ class HandTrackingManager: NSObject {
     func stop() {
         isRunning = false
         previousPalmY = nil
-        previousGrabPos = nil
     }
 
     /// Called by PassthroughManager with each camera frame
@@ -71,7 +69,6 @@ class HandTrackingManager: NSObject {
                 self.isGrabbing = false
             }
             previousPalmY = nil
-            previousGrabPos = nil
             return
         }
 
@@ -108,13 +105,6 @@ class HandTrackingManager: NSObject {
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
 
-        // Grab delta
-        var gDelta = CGPoint.zero
-        if isFist, let prev = previousGrabPos {
-            gDelta = CGPoint(x: wristPos.x - prev.x, y: wristPos.y - prev.y)
-        }
-        previousGrabPos = isFist ? wristPos : nil
-
         // Scroll detection (only when NOT grabbing)
         let palmY = 1.0 - wrist.location.y
         var scrollD: CGFloat = 0
@@ -128,7 +118,7 @@ class HandTrackingManager: NSObject {
             self.indexTipPosition = indexPos
             self.scrollDelta = scrollD
             self.isGrabbing = isFist
-            self.grabDelta = gDelta
+            self.grabPosition = wristPos
 
             if pinchDetected && !self.pinchCooldown && !isFist {
                 self.isPinching = true

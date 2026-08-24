@@ -49,9 +49,11 @@ class VRBrowserNode: SCNNode {
         DispatchQueue.main.async {
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let window = windowScene.windows.first {
-                // Place off-screen so it doesn't block UI, but stays in hierarchy to render
-                self.webView.frame = CGRect(x: -9999, y: -9999, width: webWidth, height: webHeight)
-                window.addSubview(self.webView)
+                // Place it exactly on screen at 0,0 with full size.
+                // Since we insert it at index 0, it will be BEHIND the SwiftUI view (Color.black)
+                // so the user will never see it directly, but iOS will fully render it!
+                self.webView.frame = CGRect(x: 0, y: 0, width: webWidth, height: webHeight)
+                window.insertSubview(self.webView, at: 0)
             }
         }
     }

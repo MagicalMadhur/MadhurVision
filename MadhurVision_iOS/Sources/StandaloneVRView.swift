@@ -222,6 +222,10 @@ class VREngine: ObservableObject {
         PassthroughManager.shared.start(scene: scene)
     }
     
+    // Grab State
+    private var isCurrentlyGrabbing = false
+    private var grabOffset: SCNVector3 = SCNVector3Zero
+    
     // MARK: - Hand Tracking
     
     private func startHandTracking() {
@@ -232,23 +236,53 @@ class VREngine: ObservableObject {
         // Combine all hand data into one stream
         ht.$indexTipPosition
             .combineLatest(ht.$isPinching, ht.$scrollDelta)
-            .combineLatest(ht.$isGrabbing, ht.$grabDelta)
+            .combineLatest(ht.$isGrabbing, ht.$grabPosition)
             .receive(on: RunLoop.main)
             .sink { [weak self] combined in
                 guard let self else { return }
-                let ((fingerPos, isPinching, scrollDelta), isGrabbing, grabDelta) = combined
+                let ((fingerPos, isPinching, scrollDelta), isGrabbing, grabPosition) = combined
                 
                 // Window grab & move: fist clench drags the browser in 3D
                 if isGrabbing, let browser = self.browserNode {
-                    let moveSpeed: Float = 5.0
-                    let dx = Float(grabDelta.x) * moveSpeed
-                    let dy = Float(-grabDelta.y) * moveSpeed
-                    browser.position = SCNVector3(
-                        browser.position.x + dx,
-                        browser.position.y + dy,
-                        browser.position.z
+                    // 1. Convert 2D hand position to 3D point at Z = browser distance relative to camera
+                    let ndcX = Float(grabPosition.x * 2.0 - 1.0)
+                    let ndcY = Float(grabPosition.y * 2.0 - 1.0)
+                    
+                    // Scale to world dimensions at z = 2.5
+                    let worldX = ndcX * 2.5
+                    let worldY = ndcY * 2.5
+                    let localPoint = SCNVector3(worldX, -worldY, self.browserDistance) // Invert Y
+                    
+                    // Convert local point to world space relative to the camera
+                    let worldPoint = self.leftCameraNode.convertPosition(localPoint, to: nil)
+                    
+                    if !self.isCurrentlyGrabbing {
+                        self.isCurrentlyGrabbing = true
+                        // Record offset from hand ray to browser center
+                        self.grabOffset = SCNVector3(
+                            browser.position.x - worldPoint.x,
+                            browser.position.y - worldPoint.y,
+                            browser.position.z - worldPoint.z
+                        )
+                    }
+                    
+                    let targetPos = SCNVector3(
+                        worldPoint.x + self.grabOffset.x,
+                        worldPoint.y + self.grabOffset.y,
+                        worldPoint.z + self.grabOffset.z
                     )
+                    
+                    // Smoothly interpolate to target position
+                    browser.position.x += (targetPos.x - browser.position.x) * 0.15
+                    browser.position.y += (targetPos.y - browser.position.y) * 0.15
+                    browser.position.z += (targetPos.z - browser.position.z) * 0.15
+                    
+                    // Keep the browser facing the user!
+                    browser.eulerAngles = self.cameraRig.eulerAngles
+                    
                     return  // skip cursor update while grabbing
+                } else {
+                    self.isCurrentlyGrabbing = false
                 }
                 
                 // Normal cursor behavior
