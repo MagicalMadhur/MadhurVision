@@ -435,29 +435,32 @@ class VREngine: ObservableObject {
                     // Convert local point to world space relative to the camera
                     let worldPoint = self.leftCameraNode.convertPosition(localPoint, to: nil)
                     
+                    // Convert worldPoint to osAnchorNode's local space
+                    let localPointInOS = self.osAnchorNode.convertPosition(worldPoint, from: nil)
+                    
                     if !self.isCurrentlyGrabbing {
                         self.isCurrentlyGrabbing = true
-                        // Record offset from hand ray to browser center
+                        // Record offset from hand ray to browser center (in OS LOCAL space)
                         self.grabOffset = SCNVector3(
-                            activeNode.position.x - worldPoint.x,
-                            activeNode.position.y - worldPoint.y,
-                            activeNode.position.z - worldPoint.z
+                            activeNode.position.x - localPointInOS.x,
+                            activeNode.position.y - localPointInOS.y,
+                            activeNode.position.z - localPointInOS.z
                         )
                     }
                     
                     let targetPos = SCNVector3(
-                        worldPoint.x + self.grabOffset.x,
-                        worldPoint.y + self.grabOffset.y,
-                        worldPoint.z + self.grabOffset.z
+                        localPointInOS.x + self.grabOffset.x,
+                        localPointInOS.y + self.grabOffset.y,
+                        localPointInOS.z + self.grabOffset.z
                     )
                     
-                    // Smoothly interpolate to target position
+                    // Smoothly interpolate to target position (in OS LOCAL space)
                     activeNode.position.x += (targetPos.x - activeNode.position.x) * 0.15
                     activeNode.position.y += (targetPos.y - activeNode.position.y) * 0.15
                     activeNode.position.z += (targetPos.z - activeNode.position.z) * 0.15
                     
                     // Keep the window facing the user!
-                    activeNode.eulerAngles = self.cameraRig.eulerAngles
+                    activeNode.worldOrientation = self.cameraRig.worldOrientation
                     
                     return  // skip cursor update while grabbing
                 } else {
