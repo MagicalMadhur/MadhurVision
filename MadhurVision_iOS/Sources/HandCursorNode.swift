@@ -41,6 +41,8 @@ class HandCursorNode: SCNNode {
     /// Called every render frame from VREngine.
     /// `fingerPos` is normalized (0–1) in screen space.
     /// `cameraNode` is the active eye camera for raycasting.
+    private var previousIsPinching = false
+
     func update(fingerPos: CGPoint,
                 cameraNode: SCNNode,
                 scene: SCNScene,
@@ -50,18 +52,20 @@ class HandCursorNode: SCNNode {
         guard fingerPos != .zero else {
             dotNode.isHidden = true
             smoothedFingerPos = nil
+            previousIsPinching = false
             return
         }
 
-        // Apply strong low-pass filter to eliminate jitter (sniper-level stabilization)
-        let target = fingerPos
-        if let current = smoothedFingerPos {
-            smoothedFingerPos = CGPoint(
-                x: current.x + (target.x - current.x) * 0.05,
-                y: current.y + (target.y - current.y) * 0.05
-            )
+        // Extremely aggressive low-pass filter (0.05) to eliminate all jitter
+        if smoothedFingerPos == nil {
+            smoothedFingerPos = fingerPos
         } else {
-            smoothedFingerPos = target
+            let alpha: CGFloat = 0.05
+            let current = smoothedFingerPos!
+            smoothedFingerPos = CGPoint(
+                x: current.x + (fingerPos.x - current.x) * alpha,
+                y: current.y + (fingerPos.y - current.y) * alpha
+            )
         }
         let pos = smoothedFingerPos!
 
@@ -99,7 +103,8 @@ class HandCursorNode: SCNNode {
             let uv = CGPoint(x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
                              y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y))
 
-            if isPinching {
+            // Only fire click ONCE per pinch (rising edge)
+            if isPinching && !previousIsPinching {
                 browserNode?.simulateClick(at: uv)
             }
 
@@ -111,5 +116,7 @@ class HandCursorNode: SCNNode {
             // Cursor not on browser — hide or float in air
             dotNode.isHidden = true
         }
+        
+        previousIsPinching = isPinching
     }
 }

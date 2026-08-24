@@ -94,11 +94,13 @@ class HandTrackingManager: NSObject {
         let thumbPos = CGPoint(x: thumbTip.location.x,
                                y: 1.0 - thumbTip.location.y)
 
-        // Pinch detection
+        // Pinch detection: Index and thumb close, and middle/ring explicitly straight
+        let middleStraight = middleTip.location.y > middleMCP.location.y
+        let ringStraight = ringTip.location.y > ringMCP.location.y
         let pinchDist = hypot(indexPos.x - thumbPos.x, indexPos.y - thumbPos.y)
-        let pinchDetected = pinchDist < 0.06
-
-        // Fist / Grab detection
+        let pinchDetected = pinchDist < 0.05 && middleStraight && ringStraight
+        
+        // Fist / Grab detection (all fingers curled)
         let isFist = (indexTip.location.y < indexMCP.location.y) &&
                      (middleTip.location.y < middleMCP.location.y) &&
                      (ringTip.location.y < ringMCP.location.y)
@@ -123,8 +125,14 @@ class HandTrackingManager: NSObject {
             if pinchDetected && !self.pinchCooldown && !isFist {
                 self.isPinching = true
                 self.pinchCooldown = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                
+                // Pulse isPinching back to false almost immediately so we only click once
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     self.isPinching = false
+                }
+                
+                // Keep the cooldown longer so we don't rapid-fire clicks
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                     self.pinchCooldown = false
                 }
             }
