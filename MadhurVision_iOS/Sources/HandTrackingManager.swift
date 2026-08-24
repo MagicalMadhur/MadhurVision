@@ -51,23 +51,18 @@ class HandTrackingManager: NSObject {
     func processFrame(_ pixelBuffer: CVPixelBuffer) {
         guard isRunning, !isProcessingFrame else { return }
         isProcessingFrame = true
-
-        // Capture immutable CGImage synchronously to avoid CVPixelBuffer mutation crashes
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext(options: [CIContextOption.useSoftwareRenderer: false])
-        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
-            self.isProcessingFrame = false
-            return
-        }
-
+        
+        // CVPixelBuffer must be strongly held while we are on the async queue,
+        // although Vision implicitly handles CVPixelBuffer lifecycle correctly
+        // as long as we don't flood the queue. The mutex above prevents flooding.
         processingQueue.async { [weak self] in
             defer { self?.isProcessingFrame = false }
-            self?.runVision(on: cgImage)
+            self?.runVision(on: pixelBuffer)
         }
     }
 
-    private func runVision(on image: CGImage) {
-        let handler = VNImageRequestHandler(cgImage: image, orientation: .up, options: [:])
+    private func runVision(on pixelBuffer: CVPixelBuffer) {
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         do {
             try handler.perform([handPoseRequest])
         } catch {
