@@ -86,13 +86,33 @@ struct StandaloneVRView: View {
 
 // MARK: - Dual-Eye SCNView Container (Native High-Perf 120Hz)
 
+class DualEyeContainerView: UIView {
+    let leftView: SCNView
+    let rightView: SCNView
+    
+    init(leftView: SCNView, rightView: SCNView) {
+        self.leftView = leftView
+        self.rightView = rightView
+        super.init(frame: .zero)
+        self.backgroundColor = .black
+        self.addSubview(leftView)
+        self.addSubview(rightView)
+    }
+    
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let halfWidth = bounds.width / 2.0
+        leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
+        rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
+    }
+}
+
 struct DualEyeVRContainer: UIViewRepresentable {
     let vrEngine: VREngine
     
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
-        container.backgroundColor = .black
-        
+    func makeUIView(context: Context) -> DualEyeContainerView {
         let leftView = SCNView()
         leftView.scene = vrEngine.scene
         leftView.pointOfView = vrEngine.leftCameraNode
@@ -101,7 +121,6 @@ struct DualEyeVRContainer: UIViewRepresentable {
         leftView.loops = true
         leftView.backgroundColor = .black
         leftView.antialiasingMode = .multisampling2X
-        leftView.tag = 1001
         
         let rightView = SCNView()
         rightView.scene = vrEngine.scene
@@ -111,10 +130,8 @@ struct DualEyeVRContainer: UIViewRepresentable {
         rightView.loops = true
         rightView.backgroundColor = .black
         rightView.antialiasingMode = .multisampling2X
-        rightView.tag = 1002
         
-        container.addSubview(leftView)
-        container.addSubview(rightView)
+        let container = DualEyeContainerView(leftView: leftView, rightView: rightView)
         
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         container.addGestureRecognizer(tap)
@@ -122,20 +139,9 @@ struct DualEyeVRContainer: UIViewRepresentable {
         return container
     }
     
-    func updateUIView(_ uiView: UIView, context: Context) {
-        let width = uiView.bounds.width
-        let height = uiView.bounds.height
-        guard width > 0, height > 0 else { return }
-        
-        let halfWidth = width / 2.0
-        if let leftView = uiView.viewWithTag(1001) as? SCNView {
-            leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: height)
-            leftView.pointOfView = vrEngine.leftCameraNode
-        }
-        if let rightView = uiView.viewWithTag(1002) as? SCNView {
-            rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: height)
-            rightView.pointOfView = vrEngine.rightCameraNode
-        }
+    func updateUIView(_ uiView: DualEyeContainerView, context: Context) {
+        uiView.leftView.pointOfView = vrEngine.leftCameraNode
+        uiView.rightView.pointOfView = vrEngine.rightCameraNode
     }
     
     func makeCoordinator() -> Coordinator {
