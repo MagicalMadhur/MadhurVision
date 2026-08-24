@@ -86,8 +86,8 @@ class HandTrackingManager: NSObject {
               let ringMCP   = try? observation.recognizedPoint(.ringMCP),
               let thumbTip  = try? observation.recognizedPoint(.thumbTip),
               let wrist     = try? observation.recognizedPoint(.wrist),
-              indexTip.confidence > 0.3,
-              thumbTip.confidence > 0.3 else { return }
+              indexTip.confidence > 0.5,
+              thumbTip.confidence > 0.5 else { return }
 
         let indexPos = CGPoint(x: indexTip.location.x,
                                y: 1.0 - indexTip.location.y)

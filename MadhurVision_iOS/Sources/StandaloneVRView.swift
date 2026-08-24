@@ -203,6 +203,8 @@ class VREngine: ObservableObject {
     
     // MARK: - Head Tracking (120Hz)
     
+    private var hasCenteredBrowser = false
+    
     private func startHeadTracking() {
         guard motionManager.isDeviceMotionAvailable else { return }
         motionManager.deviceMotionUpdateInterval = 1.0 / 120.0
@@ -213,6 +215,18 @@ class VREngine: ObservableObject {
                 y: Float(motion.attitude.yaw),
                 z: Float(motion.attitude.roll)
             )
+            
+            // Auto-center the browser on the very first valid tracking frame
+            if !self.hasCenteredBrowser {
+                self.hasCenteredBrowser = true
+                
+                // Spawn it exactly browserDistance in front of where the user is looking NOW
+                let localFront = SCNVector3(0, 0, self.browserDistance)
+                let worldFront = self.cameraRig.convertPosition(localFront, to: nil)
+                
+                self.browserNode?.position = worldFront
+                self.browserNode?.eulerAngles = self.cameraRig.eulerAngles
+            }
         }
     }
     

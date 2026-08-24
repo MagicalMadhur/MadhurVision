@@ -53,12 +53,12 @@ class HandCursorNode: SCNNode {
             return
         }
 
-        // Apply low-pass filter to eliminate jitter (same smooth logic used in grabbing)
+        // Apply strong low-pass filter to eliminate jitter (sniper-level stabilization)
         let target = fingerPos
         if let current = smoothedFingerPos {
             smoothedFingerPos = CGPoint(
-                x: current.x + (target.x - current.x) * 0.15,
-                y: current.y + (target.y - current.y) * 0.15
+                x: current.x + (target.x - current.x) * 0.05,
+                y: current.y + (target.y - current.y) * 0.05
             )
         } else {
             smoothedFingerPos = target
@@ -68,7 +68,7 @@ class HandCursorNode: SCNNode {
         // --- Convert normalized finger position to a 3D ray from the camera ---
         // Map 0–1 to -1…1 clip space
         let ndcX = Float(pos.x * 2.0 - 1.0)
-        let ndcY = Float(pos.y * 2.0 - 1.0)
+        let ndcY = -Float(pos.y * 2.0 - 1.0) // INVERT Y-AXIS HERE
 
         // Build a ray in camera space (pointing into the scene, at distance 3m)
         let rayDirection = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.0)
