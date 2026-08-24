@@ -105,11 +105,11 @@ class HandCursorNode: SCNNode {
                 onClick?(hit)
             }
             
-            // Handle scrolling if it's a browser node
+            // Handle scrolling if it's the monitor
             if scrollDelta != 0 {
                 let node = hit.node
-                if let browser = node as? VRBrowserNode ?? node.parent as? VRBrowserNode {
-                    browser.simulateScroll(by: scrollDelta)
+                if let monitor = node as? VRMonitorNode ?? node.parent as? VRMonitorNode {
+                    monitor.simulateScroll(by: scrollDelta)
                 }
             }
         } else {

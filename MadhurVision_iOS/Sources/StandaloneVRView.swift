@@ -55,18 +55,18 @@ struct StandaloneVRView: View {
                     
                     Spacer()
                     
-                    // Window size controls
-                    Button(action: { vrEngine.resizeBrowser(by: -0.2) }) {
+                    // Window size controls (projector-style scale)
+                    Button(action: { vrEngine.scaleMonitor(by: -0.15) }) {
                         Image(systemName: "minus.circle.fill")
                             .font(.system(size: 22))
                             .foregroundColor(.white.opacity(0.5))
                     }
                     
-                    Text(String(format: "%.0f%%", vrEngine.browserScale * 100))
+                    Text(String(format: "%.0f%%", vrEngine.monitorScale * 100))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundColor(.cyan)
                     
-                    Button(action: { vrEngine.resizeBrowser(by: 0.2) }) {
+                    Button(action: { vrEngine.scaleMonitor(by: 0.15) }) {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 22))
                             .foregroundColor(.white.opacity(0.5))
@@ -110,34 +110,21 @@ class VREngine: ObservableObject {
     let leftCameraNode  = SCNNode()
     let rightCameraNode = SCNNode()
     
-    enum OSState {
-        case loading
-        case desktop
-    }
-    
-    @Published var browserScale: CGFloat = 1.0  // 1.0 = default, user can resize
-    @Published var osState: OSState = .loading
+    @Published var monitorScale: CGFloat = 1.0
     
     private let cameraRig   = SCNNode()
     private let motionManager = CMMotionManager()
     
-    // The anchor node that centers the entire OS relative to the user's starting orientation
-    private let osAnchorNode = SCNNode()
-    
-    // OS Nodes
-    private var loadingNode: VRLoadingNode?
-    private var dockNode: VRDockNode?
-    private var activeWindowNode: SCNNode?
+    // Single unified monitor
+    private var monitorNode: VRMonitorNode?
     
     private var handCursor: HandCursorNode?
     private var mouseCursor: MouseCursorNode?
     
     private var cancellables = Set<AnyCancellable>()
     
-    // Base browser dimensions (before scaling)
-    private let baseBrowserWidth:  CGFloat = 2.8
-    private let baseBrowserHeight: CGFloat = 1.6
-    private let browserDistance:    Float  = -2.5
+    // Monitor dimensions
+    private let monitorDistance: Float = -2.2
     
     // IPD
     private let ipd: Float = 0.065
@@ -152,37 +139,33 @@ class VREngine: ObservableObject {
         startHeadTracking()
         startPassthrough()
         startTracking()
-        bootOS()
+        spawnMonitor()
     }
     
     func stop() {
         motionManager.stopDeviceMotionUpdates()
-        if let browser = activeWindowNode as? VRBrowserNode {
-            browser.cleanup()
-        }
+        monitorNode?.cleanup()
         PassthroughManager.shared.stop()
         HandTrackingManager.shared.stop()
         cancellables.removeAll()
     }
     
-    // MARK: - Resize
+    // MARK: - Scale (Projector-style: just scales the 3D node, doesn't affect internal UI)
     
-    func resizeBrowser(by delta: CGFloat) {
-        browserScale = max(0.3, min(2.0, browserScale + delta))
-        let s = Float(browserScale)
-        activeWindowNode?.scale = SCNVector3(s, s, s)
+    func scaleMonitor(by delta: CGFloat) {
+        monitorScale = max(0.4, min(2.5, monitorScale + delta))
+        let s = Float(monitorScale)
+        monitorNode?.scale = SCNVector3(s, s, s)
     }
     
-    // MARK: - Direct Screen Taps (Fallback for AssistiveTouch)
+    // MARK: - Direct Screen Taps (Fallback)
     
     func handleDirectScreenTap(location: CGPoint, isLeftEye: Bool, size: CGSize) {
         let cameraNode = isLeftEye ? leftCameraNode : rightCameraNode
         
-        // Convert screen coordinate to normalized device coordinates (-1 to 1)
         let ndcX = Float(location.x / size.width) * 2.0 - 1.0
         let ndcY = -(Float(location.y / size.height) * 2.0 - 1.0)
         
-        // Cast ray into the scene
         let rayDirection = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.0)
         let worldOrigin = cameraNode.worldPosition
         let worldDirection = cameraNode.convertVector(rayDirection, to: nil)
@@ -205,22 +188,15 @@ class VREngine: ObservableObject {
     }
     
     private func handleHit(_ hit: SCNHitTestResult) {
-        if let name = hit.node.name {
-            if name == "dock_browser" {
-                launchApp(type: .browser)
-                return
-            } else if name == "dock_settings" {
-                launchApp(type: .settings)
-                return
-            }
-        }
-        
-        // If it's a browser window, send click
+        // All clicks go to the single monitor
         let node = hit.node
-        if let browser = activeWindowNode as? VRBrowserNode, node === browser || node.parent === browser {
-            let uv = CGPoint(x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
-                             y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y))
-            browser.simulateClick(at: uv)
+        if let monitor = monitorNode,
+           node === monitor || node.parent === monitor || node.name == "monitor_border" {
+            let uv = CGPoint(
+                x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
+                y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y)
+            )
+            monitor.simulateClick(at: uv)
         }
     }
     
@@ -234,9 +210,6 @@ class VREngine: ObservableObject {
         ambient.light?.type = .ambient
         ambient.light?.intensity = 400
         scene.rootNode.addChildNode(ambient)
-        
-        // Add osAnchorNode to the scene
-        scene.rootNode.addChildNode(osAnchorNode)
     }
     
     private func setupCameras() {
@@ -258,77 +231,22 @@ class VREngine: ObservableObject {
         cameraRig.addChildNode(rightCameraNode)
     }
     
-    private func bootOS() {
-        osState = .loading
-        let loader = VRLoadingNode()
-        // Center it slightly higher than eye level
-        loader.position = SCNVector3(0, 0.1, browserDistance)
-        osAnchorNode.addChildNode(loader)
-        self.loadingNode = loader
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.transitionToDesktop()
-        }
-    }
+    // MARK: - Spawn Single Monitor
     
-    private func transitionToDesktop() {
-        osState = .desktop
+    private func spawnMonitor() {
+        let monitor = VRMonitorNode()
+        // Position directly in front, slightly above eye level
+        monitor.position = SCNVector3(0, 0.05, monitorDistance)
         
-        // Fade out loading screen
-        let fadeOut = SCNAction.fadeOut(duration: 0.5)
-        loadingNode?.runAction(fadeOut) { [weak self] in
-            self?.loadingNode?.removeFromParentNode()
-            self?.loadingNode = nil
-        }
-        
-        // Spawn Dock on the left (comfortably within FOV)
-        let dock = VRDockNode()
-        dock.position = SCNVector3(-1.1, 0.1, browserDistance + 0.2) 
-        dock.eulerAngles = SCNVector3(0, Float.pi / 8, 0) // turned slightly towards user
-        dock.opacity = 0
-        osAnchorNode.addChildNode(dock)
-        self.dockNode = dock
-        
-        dock.runAction(SCNAction.fadeIn(duration: 0.5))
-    }
-    
-    enum AppType {
-        case browser
-        case settings
-    }
-    
-    private func launchApp(type: AppType) {
-        // Cleanup old app
-        if let browser = activeWindowNode as? VRBrowserNode {
-            browser.cleanup()
-        }
-        activeWindowNode?.removeFromParentNode()
-        
-        let newNode: SCNNode
-        switch type {
-        case .browser:
-            newNode = VRBrowserNode(
-                url: URL(string: "https://www.google.com")!,
-                width: baseBrowserWidth,
-                height: baseBrowserHeight
-            )
-        case .settings:
-            newNode = VRSettingsNode()
-        }
-        
-        newNode.position = SCNVector3(0.3, 0.1, browserDistance) // slightly shifted right to make room for dock
+        // Gentle bobbing animation
         let bob = SCNAction.sequence([
-            SCNAction.moveBy(x: 0, y: 0.03, z: 0, duration: 2.0),
-            SCNAction.moveBy(x: 0, y: -0.03, z: 0, duration: 2.0)
+            SCNAction.moveBy(x: 0, y: 0.02, z: 0, duration: 2.5),
+            SCNAction.moveBy(x: 0, y: -0.02, z: 0, duration: 2.5)
         ])
-        newNode.runAction(SCNAction.repeatForever(bob))
+        monitor.runAction(SCNAction.repeatForever(bob))
         
-        // Appear animation
-        newNode.scale = SCNVector3(0.01, 0.01, 0.01)
-        newNode.runAction(SCNAction.scale(to: CGFloat(browserScale), duration: 0.4))
-        
-        osAnchorNode.addChildNode(newNode)
-        self.activeWindowNode = newNode
+        scene.rootNode.addChildNode(monitor)
+        self.monitorNode = monitor
     }
     
     private func setupHandCursor() {
@@ -351,7 +269,7 @@ class VREngine: ObservableObject {
     
     // MARK: - Head Tracking (120Hz)
     
-    private var hasCenteredBrowser = false
+    private var hasAlignedMonitor = false
     
     private func startHeadTracking() {
         guard motionManager.isDeviceMotionAvailable else { return }
@@ -364,14 +282,18 @@ class VREngine: ObservableObject {
                 z: Float(motion.attitude.roll)
             )
             
-            // Auto-center the active window on the very first valid tracking frame
-            if !self.hasCenteredBrowser {
-                self.hasCenteredBrowser = true
+            // On the very first valid tracking frame, align the monitor in front of the user
+            if !self.hasAlignedMonitor {
+                self.hasAlignedMonitor = true
                 
-                // Align the OS anchor to the user's initial look direction
-                self.osAnchorNode.position = self.cameraRig.position
-                // Only match the yaw (rotation around Y axis) so the OS stays level with the floor
-                self.osAnchorNode.eulerAngles = SCNVector3(0, self.cameraRig.eulerAngles.y, 0)
+                // Place the monitor directly in front of where the user is looking
+                // Convert the local "forward" point to world space
+                let localFront = SCNVector3(0, 0.05, self.monitorDistance)
+                let worldFront = self.cameraRig.convertPosition(localFront, to: nil)
+                self.monitorNode?.position = worldFront
+                
+                // Make the monitor face the user (only match yaw, keep it perfectly vertical)
+                self.monitorNode?.eulerAngles = SCNVector3(0, self.cameraRig.eulerAngles.y, 0)
             }
         }
     }
@@ -419,48 +341,39 @@ class VREngine: ObservableObject {
                 guard let self else { return }
                 let ((fingerPos, isPinching, scrollDelta), isGrabbing, grabPosition) = combined
                 
-                // Window grab & move: fist clench drags the active window in 3D
-                if isGrabbing, let activeNode = self.activeWindowNode {
-                    // 1. Convert 2D hand position to 3D point at Z = browser distance relative to camera
-                    // Apply sensitivity multiplier so small hand movements cover the whole space
+                // Window grab & move: fist clench drags the monitor in 3D
+                if isGrabbing, let monitor = self.monitorNode {
                     let sensitivity: Float = 2.5
                     let ndcX = Float(grabPosition.x * 2.0 - 1.0) * sensitivity
                     let ndcY = Float(grabPosition.y * 2.0 - 1.0) * sensitivity
                     
-                    // Scale to world dimensions at z = 2.5
                     let worldX = ndcX * 2.5
                     let worldY = ndcY * 2.5
-                    let localPoint = SCNVector3(worldX, -worldY, self.browserDistance) // Invert Y
-                    
-                    // Convert local point to world space relative to the camera
+                    let localPoint = SCNVector3(worldX, -worldY, self.monitorDistance)
                     let worldPoint = self.leftCameraNode.convertPosition(localPoint, to: nil)
-                    
-                    // Convert worldPoint to osAnchorNode's local space
-                    let localPointInOS = self.osAnchorNode.convertPosition(worldPoint, from: nil)
                     
                     if !self.isCurrentlyGrabbing {
                         self.isCurrentlyGrabbing = true
-                        // Record offset from hand ray to browser center (in OS LOCAL space)
                         self.grabOffset = SCNVector3(
-                            activeNode.position.x - localPointInOS.x,
-                            activeNode.position.y - localPointInOS.y,
-                            activeNode.position.z - localPointInOS.z
+                            monitor.position.x - worldPoint.x,
+                            monitor.position.y - worldPoint.y,
+                            monitor.position.z - worldPoint.z
                         )
                     }
                     
                     let targetPos = SCNVector3(
-                        localPointInOS.x + self.grabOffset.x,
-                        localPointInOS.y + self.grabOffset.y,
-                        localPointInOS.z + self.grabOffset.z
+                        worldPoint.x + self.grabOffset.x,
+                        worldPoint.y + self.grabOffset.y,
+                        worldPoint.z + self.grabOffset.z
                     )
                     
-                    // Smoothly interpolate to target position (in OS LOCAL space)
-                    activeNode.position.x += (targetPos.x - activeNode.position.x) * 0.15
-                    activeNode.position.y += (targetPos.y - activeNode.position.y) * 0.15
-                    activeNode.position.z += (targetPos.z - activeNode.position.z) * 0.15
+                    // Smoothly interpolate to target position
+                    monitor.position.x += (targetPos.x - monitor.position.x) * 0.15
+                    monitor.position.y += (targetPos.y - monitor.position.y) * 0.15
+                    monitor.position.z += (targetPos.z - monitor.position.z) * 0.15
                     
-                    // Keep the window facing the user!
-                    activeNode.worldOrientation = self.cameraRig.worldOrientation
+                    // Keep the monitor perfectly vertical, facing the user (only yaw)
+                    monitor.eulerAngles = SCNVector3(0, self.cameraRig.eulerAngles.y, 0)
                     
                     return  // skip cursor update while grabbing
                 } else {
