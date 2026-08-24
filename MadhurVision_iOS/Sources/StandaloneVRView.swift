@@ -39,11 +39,31 @@ class DualEyeContainerView: UIView {
     let leftView: SCNView
     let rightView: SCNView
     
+    // Hardware-accelerated GPU passthrough
+    private let leftPreview: AVCaptureVideoPreviewLayer
+    private let rightPreview: AVCaptureVideoPreviewLayer
+    
     init(leftView: SCNView, rightView: SCNView) {
         self.leftView = leftView
         self.rightView = rightView
+        
+        leftPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
+        leftPreview.videoGravity = .resizeAspectFill
+        rightPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
+        rightPreview.videoGravity = .resizeAspectFill
+        
         super.init(frame: .zero)
         self.backgroundColor = .black
+        
+        if let conn = leftPreview.connection, conn.isVideoOrientationSupported {
+            conn.videoOrientation = .landscapeRight
+        }
+        if let conn = rightPreview.connection, conn.isVideoOrientationSupported {
+            conn.videoOrientation = .landscapeRight
+        }
+        
+        self.layer.addSublayer(leftPreview)
+        self.layer.addSublayer(rightPreview)
         self.addSubview(leftView)
         self.addSubview(rightView)
     }
@@ -53,8 +73,14 @@ class DualEyeContainerView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let halfWidth = bounds.width / 2.0
-        leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
-        rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
+        let leftF = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
+        let rightF = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
+        
+        leftPreview.frame = leftF
+        leftView.frame = leftF
+        
+        rightPreview.frame = rightF
+        rightView.frame = rightF
     }
 }
 
@@ -68,7 +94,7 @@ struct DualEyeVRContainer: UIViewRepresentable {
         leftView.preferredFramesPerSecond = 120
         leftView.isPlaying = true
         leftView.loops = true
-        leftView.backgroundColor = .black
+        leftView.backgroundColor = .clear
         leftView.antialiasingMode = .multisampling2X
         
         let rightView = SCNView()
@@ -77,7 +103,7 @@ struct DualEyeVRContainer: UIViewRepresentable {
         rightView.preferredFramesPerSecond = 120
         rightView.isPlaying = true
         rightView.loops = true
-        rightView.backgroundColor = .black
+        rightView.backgroundColor = .clear
         rightView.antialiasingMode = .multisampling2X
         
         let container = DualEyeContainerView(leftView: leftView, rightView: rightView)

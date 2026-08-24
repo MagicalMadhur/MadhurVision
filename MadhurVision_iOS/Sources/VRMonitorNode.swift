@@ -130,9 +130,10 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             }
             
             if let window = targetWindow {
-                self.webView.frame = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
+                // Place it far off-screen so it doesn't block the 2D UI, but keep alpha = 1.0 so snapshots are fully opaque!
+                self.webView.frame = CGRect(x: -9999, y: -9999, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
                 self.webView.isUserInteractionEnabled = false
-                self.webView.alpha = 0.05 // Active in compositor without blocking 2D view
+                self.webView.alpha = 1.0 
                 window.insertSubview(self.webView, at: 0)
             }
             
