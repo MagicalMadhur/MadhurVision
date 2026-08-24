@@ -97,6 +97,9 @@ struct DualEyeVRContainer: UIViewRepresentable {
         leftView.preferredFramesPerSecond = 120
         leftView.isPlaying = true
         leftView.loops = true
+        // This is the sole authority that mutates the shared scene. The right
+        // eye renders the same scene but never runs a second update callback.
+        leftView.delegate = vrEngine
         leftView.backgroundColor = .clear
         leftView.antialiasingMode = .multisampling2X
         
@@ -157,7 +160,7 @@ struct Crosshair: View {
 
 // MARK: - VR Engine
 
-class VREngine: ObservableObject {
+class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     let scene = SCNScene()
     let leftCameraNode  = SCNNode()
     let rightCameraNode = SCNNode()
@@ -175,6 +178,35 @@ class VREngine: ObservableObject {
     private var mouseCursor: MouseCursorNode?
     
     private var cancellables = Set<AnyCancellable>()
+
+    /// Data from UIKit, Vision, Core Motion, and WebKit is only written here.
+    /// SceneKit nodes are touched exclusively from renderer(_:updateAtTime:).
+    private struct PendingSceneInput {
+        var hand: HandTrackingInput?
+        var mouse: MouseTrackingInput?
+        var headRotation: SCNVector3?
+        var monitorScale: Float?
+        var ipd: Float?
+        var shouldRecalibrate = false
+        var passthroughBackground: UIColor?
+        var directTap: DirectTap?
+        var monitorImage: UIImage?
+    }
+
+    private struct MouseTrackingInput {
+        let position: CGPoint
+        let isClicking: Bool
+        let isActive: Bool
+    }
+
+    private struct DirectTap {
+        let ndcX: Float
+        let ndcY: Float
+        let isLeftEye: Bool
+    }
+
+    private let pendingInputLock = NSLock()
+    private var pendingInput = PendingSceneInput()
     
     // Monitor distance in front of user
     private let monitorDistance: Float = -2.0
@@ -185,7 +217,8 @@ class VREngine: ObservableObject {
     // Reference attitude for bulletproof zero-calibration
     private var referenceAttitude: CMAttitude?
     
-    init() {
+    override init() {
+        super.init()
         setupScene()
         setupCameras()
         setupHandCursor()
@@ -208,6 +241,10 @@ class VREngine: ObservableObject {
         PassthroughManager.shared.stop()
         HandTrackingManager.shared.stop()
         cancellables.removeAll()
+
+        pendingInputLock.lock()
+        pendingInput = PendingSceneInput()
+        pendingInputLock.unlock()
     }
     
     // MARK: - Scale & Settings
@@ -219,22 +256,23 @@ class VREngine: ObservableObject {
     func setMonitorScale(_ newScale: CGFloat) {
         monitorScale = max(0.4, min(2.8, newScale))
         let s = Float(monitorScale)
-        monitorNode?.scale = SCNVector3(s, s, s)
+        enqueueSceneInput { $0.monitorScale = s }
     }
     
     func setIPD(_ newIPD: Float) {
         ipd = max(0.050, min(0.080, newIPD))
-        leftCameraNode.position = SCNVector3(-ipd / 2.0, 0, 0)
-        rightCameraNode.position = SCNVector3(ipd / 2.0, 0, 0)
+        enqueueSceneInput { $0.ipd = ipd }
     }
     
     func setPassthrough(enabled: Bool) {
         if enabled {
             PassthroughManager.shared.start(scene: scene)
-            scene.background.contents = UIColor.clear
+            enqueueSceneInput { $0.passthroughBackground = UIColor.clear }
         } else {
             PassthroughManager.shared.stop()
-            scene.background.contents = UIColor(red: 0.02, green: 0.03, blue: 0.07, alpha: 1.0)
+            enqueueSceneInput {
+                $0.passthroughBackground = UIColor(red: 0.02, green: 0.03, blue: 0.07, alpha: 1.0)
+            }
         }
     }
     
@@ -242,38 +280,20 @@ class VREngine: ObservableObject {
     
     func recalibrateView() {
         referenceAttitude = nil
-        cameraRig.eulerAngles = SCNVector3(0, 0, 0)
-        monitorNode?.position = SCNVector3(0, 0.05, monitorDistance)
-        monitorNode?.eulerAngles = SCNVector3(0, 0, 0)
+        enqueueSceneInput { $0.shouldRecalibrate = true }
     }
     
     // MARK: - Direct Screen Taps (Fallback)
     
     func handleDirectScreenTap(location: CGPoint, isLeftEye: Bool, size: CGSize) {
-        let cameraNode = isLeftEye ? leftCameraNode : rightCameraNode
-        
-        let ndcX = Float(location.x / size.width) * 2.0 - 1.0
-        let ndcY = -(Float(location.y / size.height) * 2.0 - 1.0)
-        
-        let rayDirection = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.0)
-        let worldOrigin = cameraNode.worldPosition
-        let worldDirection = cameraNode.convertVector(rayDirection, to: nil)
-        
-        let rayEnd = SCNVector3(
-            worldOrigin.x + worldDirection.x,
-            worldOrigin.y + worldDirection.y,
-            worldOrigin.z + worldDirection.z
+        guard size.width > 0, size.height > 0 else { return }
+
+        let tap = DirectTap(
+            ndcX: Float(location.x / size.width) * 2.0 - 1.0,
+            ndcY: -(Float(location.y / size.height) * 2.0 - 1.0),
+            isLeftEye: isLeftEye
         )
-        
-        let hits = scene.rootNode.hitTestWithSegment(
-            from: worldOrigin,
-            to: rayEnd,
-            options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
-        )
-        
-        if let hit = hits.first {
-            handleHit(hit)
-        }
+        enqueueSceneInput { $0.directTap = tap }
     }
     
     private func handleHit(_ hit: SCNHitTestResult) {
@@ -284,7 +304,22 @@ class VREngine: ObservableObject {
                 x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
                 y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y)
             )
-            monitor.simulateClick(at: uv)
+            // WebKit must run on the main thread. Only the UIKit interaction
+            // crosses threads; all SceneKit reads above happen in the renderer.
+            DispatchQueue.main.async { [weak monitor] in
+                monitor?.simulateClick(at: uv)
+            }
+        }
+    }
+
+    private func handleScroll(_ hit: SCNHitTestResult, delta: CGFloat) {
+        guard delta != 0 else { return }
+        let node = hit.node
+        guard let monitor = monitorNode,
+              node === monitor || node.parent === monitor || node.name == "monitor_border" else { return }
+
+        DispatchQueue.main.async { [weak monitor] in
+            monitor?.simulateScroll(by: delta)
         }
     }
     
@@ -347,6 +382,9 @@ class VREngine: ObservableObject {
                 self.onExit?()
             }
         }
+        monitor.onSnapshotImage = { [weak self] image in
+            self?.enqueueSceneInput { $0.monitorImage = image }
+        }
         
         // Position directly in front at eye level (Z = -2.0m)
         monitor.position = SCNVector3(0, 0.05, monitorDistance)
@@ -367,6 +405,9 @@ class VREngine: ObservableObject {
         let cursor = HandCursorNode()
         cursor.onClick = { [weak self] hit in
             self?.handleHit(hit)
+        }
+        cursor.onScroll = { [weak self] hit, delta in
+            self?.handleScroll(hit, delta: delta)
         }
         scene.rootNode.addChildNode(cursor)
         self.handCursor = cursor
@@ -408,7 +449,7 @@ class VREngine: ObservableObject {
             let pitch = Float(-current.roll)
             let yaw   = Float(-current.yaw)
             
-            self.cameraRig.eulerAngles = SCNVector3(pitch, yaw, 0)
+            self.enqueueSceneInput { $0.headRotation = SCNVector3(pitch, yaw, 0) }
         }
     }
     
@@ -431,78 +472,161 @@ class VREngine: ObservableObject {
         let ht = HandTrackingManager.shared
         let mt = MouseTrackingManager.shared
         
-        // Combine mouse data stream
+        // Publishers only enqueue value data. They never read or mutate a
+        // SceneKit node because the two eye renderers can be active here.
         mt.$virtualPosition
             .combineLatest(mt.$isLeftClicking, mt.$isMouseActive)
             .receive(on: RunLoop.main)
             .sink { [weak self] (pos, isClicking, isActive) in
-                guard let self else { return }
-                if isActive {
-                    self.mouseCursor?.update(virtualPosition: pos,
-                                             cameraNode: self.leftCameraNode,
-                                             scene: self.scene,
-                                             isClicking: isClicking)
+                self?.enqueueSceneInput {
+                    $0.mouse = MouseTrackingInput(
+                        position: pos,
+                        isClicking: isClicking,
+                        isActive: isActive
+                    )
                 }
             }
             .store(in: &cancellables)
         
-        // Combine all hand tracking data into one stream
-        ht.$indexTipPosition
-            .combineLatest(ht.$isPinching, ht.$scrollDelta)
-            .combineLatest(ht.$isGrabbing, ht.$grabPosition)
+        // HandTrackingInput is emitted once per Vision result, so gesture
+        // fields cannot be sampled halfway through a publish cycle.
+        ht.$latestInput
             .receive(on: RunLoop.main)
-            .sink { [weak self] combined in
-                guard let self else { return }
-                let ((fingerPos, isPinching, scrollDelta), isGrabbing, grabPosition) = combined
-                
-                // Fist Clench / Grab: drags the single monitor smoothly in 3D space
-                if isGrabbing, let monitor = self.monitorNode {
-                    let sensitivity: Float = 2.5
-                    let ndcX = Float(grabPosition.x * 2.0 - 1.0) * sensitivity
-                    let ndcY = Float(grabPosition.y * 2.0 - 1.0) * sensitivity
-                    
-                    let worldX = ndcX * 2.5
-                    let worldY = ndcY * 2.5
-                    let localPoint = SCNVector3(worldX, -worldY, self.monitorDistance)
-                    let worldPoint = self.leftCameraNode.convertPosition(localPoint, to: nil)
-                    
-                    if !self.isCurrentlyGrabbing {
-                        self.isCurrentlyGrabbing = true
-                        self.grabOffset = SCNVector3(
-                            monitor.position.x - worldPoint.x,
-                            monitor.position.y - worldPoint.y,
-                            monitor.position.z - worldPoint.z
-                        )
-                    }
-                    
-                    let targetPos = SCNVector3(
-                        worldPoint.x + self.grabOffset.x,
-                        worldPoint.y + self.grabOffset.y,
-                        worldPoint.z + self.grabOffset.z
-                    )
-                    
-                    // Smoothly interpolate to target position
-                    monitor.position.x += (targetPos.x - monitor.position.x) * 0.15
-                    monitor.position.y += (targetPos.y - monitor.position.y) * 0.15
-                    monitor.position.z += (targetPos.z - monitor.position.z) * 0.15
-                    
-                    // Keep the monitor locked upright facing the user
-                    monitor.eulerAngles = SCNVector3(0, self.cameraRig.eulerAngles.y, 0)
-                    
-                    return // skip cursor raycast while grabbing
-                } else {
-                    self.isCurrentlyGrabbing = false
-                }
-                
-                // Normal Hand Cursor Update
-                self.handCursor?.update(
-                    fingerPos:   fingerPos,
-                    cameraNode:  self.leftCameraNode,
-                    scene:       self.scene,
-                    isPinching:  isPinching,
-                    scrollDelta: scrollDelta
-                )
+            .sink { [weak self] input in
+                self?.enqueueSceneInput { $0.hand = input }
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - SceneKit Render Loop
+
+    /// The left SCNView is the only view assigned this delegate. This method
+    /// is the sole runtime owner of scene graph reads and writes after setup.
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        let input = takePendingSceneInput()
+
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0
+        SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
+
+        if input.shouldRecalibrate {
+            cameraRig.eulerAngles = SCNVector3Zero
+            monitorNode?.position = SCNVector3(0, 0.05, monitorDistance)
+            monitorNode?.eulerAngles = SCNVector3Zero
+            isCurrentlyGrabbing = false
+        }
+
+        if let rotation = input.headRotation {
+            cameraRig.eulerAngles = rotation
+        }
+
+        if let ipd = input.ipd {
+            leftCameraNode.position = SCNVector3(-ipd / 2.0, 0, 0)
+            rightCameraNode.position = SCNVector3(ipd / 2.0, 0, 0)
+        }
+
+        if let scale = input.monitorScale {
+            monitorNode?.scale = SCNVector3(scale, scale, scale)
+        }
+
+        if let background = input.passthroughBackground {
+            scene.background.contents = background
+        }
+
+        if let image = input.monitorImage {
+            monitorNode?.applySnapshot(image)
+        }
+
+        if let tap = input.directTap {
+            applyDirectScreenTap(tap)
+        }
+
+        if let hand = input.hand {
+            applyHandInput(hand)
+        }
+
+        if let mouse = input.mouse, mouse.isActive {
+            mouseCursor?.update(
+                virtualPosition: mouse.position,
+                cameraNode: leftCameraNode,
+                scene: scene,
+                isClicking: mouse.isClicking
+            )
+        }
+    }
+
+    private func enqueueSceneInput(_ update: (inout PendingSceneInput) -> Void) {
+        pendingInputLock.lock()
+        update(&pendingInput)
+        pendingInputLock.unlock()
+    }
+
+    private func takePendingSceneInput() -> PendingSceneInput {
+        pendingInputLock.lock()
+        let input = pendingInput
+        pendingInput = PendingSceneInput()
+        pendingInputLock.unlock()
+        return input
+    }
+
+    private func applyDirectScreenTap(_ tap: DirectTap) {
+        let cameraNode = tap.isLeftEye ? leftCameraNode : rightCameraNode
+        let rayDirection = SCNVector3(tap.ndcX * 1.5, tap.ndcY * 1.5, -3.0)
+        let worldOrigin = cameraNode.worldPosition
+        let worldDirection = cameraNode.convertVector(rayDirection, to: nil)
+        let rayEnd = SCNVector3(
+            worldOrigin.x + worldDirection.x,
+            worldOrigin.y + worldDirection.y,
+            worldOrigin.z + worldDirection.z
+        )
+
+        let hits = scene.rootNode.hitTestWithSegment(
+            from: worldOrigin,
+            to: rayEnd,
+            options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
+        )
+        if let hit = hits.first {
+            handleHit(hit)
+        }
+    }
+
+    private func applyHandInput(_ input: HandTrackingInput) {
+        if input.isGrabbing, let monitor = monitorNode {
+            let sensitivity: Float = 2.5
+            let ndcX = Float(input.grabPosition.x * 2.0 - 1.0) * sensitivity
+            let ndcY = Float(input.grabPosition.y * 2.0 - 1.0) * sensitivity
+            let localPoint = SCNVector3(ndcX * 2.5, -ndcY * 2.5, monitorDistance)
+            let worldPoint = leftCameraNode.convertPosition(localPoint, to: nil)
+
+            if !isCurrentlyGrabbing {
+                isCurrentlyGrabbing = true
+                grabOffset = SCNVector3(
+                    monitor.position.x - worldPoint.x,
+                    monitor.position.y - worldPoint.y,
+                    monitor.position.z - worldPoint.z
+                )
+            }
+
+            let target = SCNVector3(
+                worldPoint.x + grabOffset.x,
+                worldPoint.y + grabOffset.y,
+                worldPoint.z + grabOffset.z
+            )
+            monitor.position.x += (target.x - monitor.position.x) * 0.15
+            monitor.position.y += (target.y - monitor.position.y) * 0.15
+            monitor.position.z += (target.z - monitor.position.z) * 0.15
+            monitor.eulerAngles = SCNVector3(0, cameraRig.eulerAngles.y, 0)
+            return
+        }
+
+        isCurrentlyGrabbing = false
+        handCursor?.update(
+            fingerPos: input.indexTipPosition,
+            cameraNode: leftCameraNode,
+            scene: scene,
+            isPinching: input.isPinching,
+            scrollDelta: input.scrollDelta
+        )
     }
 }

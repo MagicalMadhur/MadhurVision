@@ -7,6 +7,7 @@ class HandCursorNode: SCNNode {
 
     // The closure to call when a pinch-click occurs
     var onClick: ((SCNHitTestResult) -> Void)?
+    var onScroll: ((SCNHitTestResult, CGFloat) -> Void)?
 
     // The glowing dot
     private let dotNode = SCNNode()
@@ -105,12 +106,10 @@ class HandCursorNode: SCNNode {
                 onClick?(hit)
             }
             
-            // Handle scrolling if it's the monitor
+            // The engine validates the target and forwards the WebKit call to
+            // the main thread. This renderer never performs UIKit work itself.
             if scrollDelta != 0 {
-                let node = hit.node
-                if let monitor = node as? VRMonitorNode ?? node.parent as? VRMonitorNode {
-                    monitor.simulateScroll(by: scrollDelta)
-                }
+                onScroll?(hit, scrollDelta)
             }
         } else {
             // Cursor not on browser — hide or float in air

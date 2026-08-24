@@ -16,6 +16,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     var onRecalibrateRequested: (() -> Void)?
     var onPassthroughToggled: ((Bool) -> Void)?
     var onExitVRRequested: (() -> Void)?
+    /// Delivers WebKit snapshots to VREngine's SceneKit render loop.
+    var onSnapshotImage: ((UIImage) -> Void)?
     
     private var webView: WKWebView!
     private let monitorWidth: CGFloat
@@ -171,11 +173,15 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             self.isSnapshotting = false
             
             if let image = image {
-                DispatchQueue.main.async {
-                    self.geometry?.firstMaterial?.diffuse.contents = image
-                }
+                onSnapshotImage?(image)
             }
         }
+    }
+
+    /// Must be called from VREngine.renderer(_:updateAtTime:) once the node
+    /// belongs to a live scene.
+    func applySnapshot(_ image: UIImage) {
+        geometry?.firstMaterial?.diffuse.contents = image
     }
     
     // MARK: - Interaction Simulation

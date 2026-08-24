@@ -3,6 +3,25 @@ import Vision
 import Combine
 import CoreImage
 
+/// An atomic result from one Vision pass. Consumers should subscribe to this
+/// instead of combining the individual @Published properties, which can expose
+/// partially updated gesture state.
+struct HandTrackingInput {
+    let indexTipPosition: CGPoint
+    let isPinching: Bool
+    let scrollDelta: CGFloat
+    let isGrabbing: Bool
+    let grabPosition: CGPoint
+
+    static let noHand = HandTrackingInput(
+        indexTipPosition: .zero,
+        isPinching: false,
+        scrollDelta: 0,
+        isGrabbing: false,
+        grabPosition: .zero
+    )
+}
+
 /// Detects hand pose from camera frames and publishes
 /// normalized finger positions and gesture states.
 /// NOTE: Does NOT run its own camera session.
@@ -16,6 +35,7 @@ class HandTrackingManager: NSObject {
     @Published var scrollDelta: CGFloat = 0.0
     @Published var isGrabbing: Bool = false
     @Published var grabPosition: CGPoint = .zero
+    @Published private(set) var latestInput: HandTrackingInput = .noHand
 
     // Vision request
     private lazy var handPoseRequest: VNDetectHumanHandPoseRequest = {
@@ -31,44 +51,72 @@ class HandTrackingManager: NSObject {
 
     // Frame processing mutex
     private var isProcessingFrame = false
+    private let stateLock = NSLock()
 
     private override init() {
         super.init()
     }
 
     func start() {
+        stateLock.lock()
         isRunning = true
+        stateLock.unlock()
     }
 
     func stop() {
+        stateLock.lock()
         isRunning = false
-        previousPalmY = nil
+        stateLock.unlock()
+
+        // previousPalmY belongs to the serial Vision queue.
+        processingQueue.async { [weak self] in
+            self?.previousPalmY = nil
+        }
     }
 
     private let processingQueue = DispatchQueue(label: "HandTrackingQueue", qos: .userInteractive)
 
     /// Called by PassthroughManager with each camera frame
     func processFrame(_ pixelBuffer: CVPixelBuffer) {
-        guard isRunning, !isProcessingFrame else { return }
+        stateLock.lock()
+        guard isRunning, !isProcessingFrame else {
+            stateLock.unlock()
+            return
+        }
         isProcessingFrame = true
+        stateLock.unlock()
         
         // Deep copy the pixel buffer synchronously before returning, so the camera hardware can 
         // immediately recycle the original buffer. This prevents EX_BAD_ACCESS (memory corruption)
         // AND prevents OS Watchdog timeouts (which happen if we block the camera queue too long).
         guard let copiedBuffer = pixelBuffer.deepCopy() else {
-            isProcessingFrame = false
+            finishProcessingFrame()
             return
         }
         
         processingQueue.async { [weak self] in
             autoreleasepool {
-                defer { self?.isProcessingFrame = false }
+                defer { self?.finishProcessingFrame() }
                 self?.runVision(on: copiedBuffer)
             }
         }
     }
 
+    private func finishProcessingFrame() {
+        stateLock.lock()
+        isProcessingFrame = false
+        stateLock.unlock()
+    }
+
+    private var isTracking: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return isRunning
+    }
+
     private func runVision(on pixelBuffer: CVPixelBuffer) {
+        guard isTracking else { return }
+
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         do {
             try handler.perform([handPoseRequest])
@@ -78,8 +126,10 @@ class HandTrackingManager: NSObject {
 
         guard let observation = handPoseRequest.results?.first else {
             DispatchQueue.main.async {
+                guard self.isTracking else { return }
                 self.indexTipPosition = .zero
                 self.isGrabbing = false
+                self.latestInput = .noHand
             }
             previousPalmY = nil
             return
@@ -129,7 +179,7 @@ class HandTrackingManager: NSObject {
         previousPalmY = isFist ? nil : palmY
 
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self, self.isTracking else { return }
             self.indexTipPosition = indexPos
             self.scrollDelta = scrollD
             self.isGrabbing = isFist
@@ -142,6 +192,13 @@ class HandTrackingManager: NSObject {
                 // Pulse isPinching back to false almost immediately so we only click once
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     self.isPinching = false
+                    self.latestInput = HandTrackingInput(
+                        indexTipPosition: self.indexTipPosition,
+                        isPinching: false,
+                        scrollDelta: 0,
+                        isGrabbing: self.isGrabbing,
+                        grabPosition: self.grabPosition
+                    )
                 }
                 
                 // Keep the cooldown longer so we don't rapid-fire clicks
@@ -149,6 +206,14 @@ class HandTrackingManager: NSObject {
                     self.pinchCooldown = false
                 }
             }
+
+            self.latestInput = HandTrackingInput(
+                indexTipPosition: indexPos,
+                isPinching: self.isPinching,
+                scrollDelta: scrollD,
+                isGrabbing: isFist,
+                grabPosition: wristPos
+            )
         }
     }
 }
@@ -162,7 +227,10 @@ extension CVPixelBuffer {
         var copy: CVPixelBuffer?
         let options: [String: Any] = [
             kCVPixelBufferCGImageCompatibilityKey as String: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+            // Enables IOSurface-backed storage so Vision can choose a hardware
+            // path when supported; Vision still selects its own execution unit.
+            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()
         ]
         
         let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, format, options as CFDictionary, &copy)
