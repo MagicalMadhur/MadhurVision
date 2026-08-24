@@ -17,7 +17,7 @@ class VRBrowserNode: SCNNode {
         addBorderFrame(width: width, height: height)
         
         // 2. Initialize the Web View
-        let resolutionMultiplier: CGFloat = 800
+        let resolutionMultiplier: CGFloat = 450 // Reduced from 800 to prevent CSS stretching bugs
         let webWidth = width * resolutionMultiplier
         let webHeight = height * resolutionMultiplier
         
@@ -30,8 +30,8 @@ class VRBrowserNode: SCNNode {
         let userScript = WKUserScript(source: keyboardJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         webConfig.userContentController.addUserScript(userScript)
         
-        // Apply styling to hide scrollbars
-        let hideScrollbarJS = "var style = document.createElement('style'); style.innerHTML = '::-webkit-scrollbar { display: none; }'; document.head.appendChild(style);"
+        // Apply styling to hide scrollbars and force dark mode
+        let hideScrollbarJS = "var style = document.createElement('style'); style.innerHTML = '::-webkit-scrollbar { display: none; } body { background-color: #0f0f0f !important; }'; document.head.appendChild(style);"
         let scrollUserScript = WKUserScript(source: hideScrollbarJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         webConfig.userContentController.addUserScript(scrollUserScript)
         
@@ -58,17 +58,11 @@ class VRBrowserNode: SCNNode {
         
         // 5. Add to view hierarchy (required for WKWebView to render in iOS 14+)
         DispatchQueue.main.async {
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let window = windowScene.windows.first {
-                // Place it exactly on screen at 0,0 with full size.
-                // We set alpha to 1.0 so SceneKit captures it at 100% opacity.
-                // To hide it from the user's direct 2D view, we insert it at index 0
-                // so it sits BEHIND the SwiftUI VR scene (which has a black background).
-                self.webView.frame = CGRect(x: 0, y: 0, width: webWidth, height: webHeight)
-                self.webView.alpha = 1.0
-                self.webView.isUserInteractionEnabled = false
-                window.insertSubview(self.webView, at: 0)
-            }
+            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = windowScene.windows.first else { return }
+            
+            // Insert at index 0 so it stays hidden behind the SCNView but remains active
+            window.insertSubview(self.webView, at: 0)
         }
     }
     
@@ -84,15 +78,31 @@ class VRBrowserNode: SCNNode {
     
     // Simulate a mouse click at the given UV coordinate (0-1)
     func simulateClick(at uv: CGPoint) {
-        let x = uv.x * webView.bounds.width
-        let y = uv.y * webView.bounds.height
-        
+        // We pass the normalized UV to Javascript, and let JS calculate the EXACT pixel 
+        // relative to the actual CSS viewport (window.innerWidth) to defeat all scaling bugs!
         let js = """
-            var el = document.elementFromPoint(\(x), \(y));
+            var cssX = \(uv.x) * window.innerWidth;
+            var cssY = \(uv.y) * window.innerHeight;
+            var el = document.elementFromPoint(cssX, cssY);
+            
+            // Debug visualizer so the user can see exactly where they clicked!
+            var dot = document.createElement('div');
+            dot.style.position = 'fixed';
+            dot.style.left = (cssX - 5) + 'px';
+            dot.style.top = (cssY - 5) + 'px';
+            dot.style.width = '10px';
+            dot.style.height = '10px';
+            dot.style.backgroundColor = 'red';
+            dot.style.borderRadius = '50%';
+            dot.style.zIndex = '999999';
+            dot.style.pointerEvents = 'none';
+            document.body.appendChild(dot);
+            setTimeout(() => dot.remove(), 500);
+
             if(el) {
-                var down = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y), pointerType: 'touch' });
-                var up = new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y), pointerType: 'touch' });
-                var click = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: \(x), clientY: \(y) });
+                var down = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, clientX: cssX, clientY: cssY, pointerType: 'touch' });
+                var up = new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, clientX: cssX, clientY: cssY, pointerType: 'touch' });
+                var click = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: cssX, clientY: cssY });
                 
                 el.dispatchEvent(down);
                 el.dispatchEvent(up);
