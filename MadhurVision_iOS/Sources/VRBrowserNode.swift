@@ -25,6 +25,11 @@ class VRBrowserNode: SCNNode {
         webConfig.allowsInlineMediaPlayback = true
         webConfig.mediaTypesRequiringUserActionForPlayback = []
         
+        // Force Desktop mode so YouTube doesn't load the broken mobile site at 2000px wide
+        let prefs = WKWebpagePreferences()
+        prefs.preferredContentMode = .desktop
+        webConfig.defaultWebpagePreferences = prefs
+        
         // Inject Air Keyboard
         let keyboardJS = VRBrowserNode.airKeyboardScript()
         let userScript = WKUserScript(source: keyboardJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
@@ -33,6 +38,9 @@ class VRBrowserNode: SCNNode {
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: webWidth, height: webHeight), configuration: webConfig)
         webView.isOpaque = false
         webView.backgroundColor = .clear
+        
+        // Spoof Mac Safari User-Agent to guarantee desktop site delivery
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15"
         
         // 3. Map the WebView's CoreAnimation Layer to the SceneKit Material
         let material = SCNMaterial()
