@@ -105,6 +105,8 @@ class VREngine: ObservableObject {
     private let motionManager = CMMotionManager()
     private var browserNode: VRBrowserNode?
     private var handCursor: HandCursorNode?
+    private var mouseCursor: MouseCursorNode?
+    
     private var cancellables = Set<AnyCancellable>()
     
     // Base browser dimensions (before scaling)
@@ -122,9 +124,10 @@ class VREngine: ObservableObject {
         setupCameras()
         setupBrowser()
         setupHandCursor()
+        setupMouseCursor()
         startHeadTracking()
         startPassthrough()
-        startHandTracking()
+        startTracking()
     }
     
     func stop() {
@@ -201,6 +204,13 @@ class VREngine: ObservableObject {
         self.handCursor = cursor
     }
     
+    private func setupMouseCursor() {
+        let cursor = MouseCursorNode()
+        cursor.browserNode = browserNode
+        scene.rootNode.addChildNode(cursor)
+        self.mouseCursor = cursor
+    }
+    
     // MARK: - Head Tracking (120Hz)
     
     private var hasCenteredBrowser = false
@@ -240,12 +250,29 @@ class VREngine: ObservableObject {
     private var isCurrentlyGrabbing = false
     private var grabOffset: SCNVector3 = SCNVector3Zero
     
-    // MARK: - Hand Tracking
+    // MARK: - Tracking
     
-    private func startHandTracking() {
+    private func startTracking() {
         HandTrackingManager.shared.start()
+        MouseTrackingManager.shared.start()
         
         let ht = HandTrackingManager.shared
+        let mt = MouseTrackingManager.shared
+        
+        // Combine mouse data stream
+        mt.$virtualPosition
+            .combineLatest(mt.$isLeftClicking, mt.$isMouseActive)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] (pos, isClicking, isActive) in
+                guard let self else { return }
+                if isActive {
+                    self.mouseCursor?.update(virtualPosition: pos,
+                                             cameraNode: self.leftCameraNode,
+                                             scene: self.scene,
+                                             isClicking: isClicking)
+                }
+            }
+            .store(in: &cancellables)
         
         // Combine all hand data into one stream
         ht.$indexTipPosition
