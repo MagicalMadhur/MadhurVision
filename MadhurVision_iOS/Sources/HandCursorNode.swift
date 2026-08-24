@@ -72,7 +72,7 @@ class HandCursorNode: SCNNode {
         let hits = scene.rootNode.hitTestWithSegment(
             from: worldOrigin,
             to: rayEnd,
-            options: [SCNHitTestOption.searchMode: SCNHitTestSearchMode.all.rawValue]
+            options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
         )
 
         if let hit = hits.first(where: { $0.node === browserNode }) {
