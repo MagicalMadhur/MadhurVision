@@ -44,6 +44,16 @@ class VRBrowserNode: SCNNode {
         // 4. Load the page
         let request = URLRequest(url: url)
         webView.load(request)
+        
+        // 5. Add to view hierarchy (required for WKWebView to render in iOS 14+)
+        DispatchQueue.main.async {
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first {
+                // Place off-screen so it doesn't block UI, but stays in hierarchy to render
+                self.webView.frame = CGRect(x: -9999, y: -9999, width: webWidth, height: webHeight)
+                window.addSubview(self.webView)
+            }
+        }
     }
     
     required init?(coder: NSCoder) {
@@ -52,6 +62,7 @@ class VRBrowserNode: SCNNode {
     
     func cleanup() {
         webView.stopLoading()
+        webView.removeFromSuperview()
         webView = nil
     }
     
