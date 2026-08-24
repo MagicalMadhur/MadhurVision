@@ -50,13 +50,13 @@ class VRBrowserNode: SCNNode {
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let window = windowScene.windows.first {
                 // Place it exactly on screen at 0,0 with full size.
-                // We add it to the top (addSubview) but set alpha to 0.01 so the user doesn't see it,
-                // BUT iOS forces it to render, preventing it from being optimized out (culled)!
-                // SceneKit will then grab the fully rendered layer for the 3D texture.
+                // We set alpha to 1.0 so SceneKit captures it at 100% opacity.
+                // To hide it from the user's direct 2D view, we insert it at index 0
+                // so it sits BEHIND the SwiftUI VR scene (which has a black background).
                 self.webView.frame = CGRect(x: 0, y: 0, width: webWidth, height: webHeight)
-                self.webView.alpha = 0.01
+                self.webView.alpha = 1.0
                 self.webView.isUserInteractionEnabled = false
-                window.addSubview(self.webView)
+                window.insertSubview(self.webView, at: 0)
             }
         }
     }
