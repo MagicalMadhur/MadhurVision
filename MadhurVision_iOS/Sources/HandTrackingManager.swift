@@ -54,6 +54,7 @@ class HandTrackingManager: NSObject {
     private var previousPalmY: CGFloat? = nil
     private var pinchCooldown = false
     private var resetCooldown = false
+    private var openPalmStartedAt: Date?
     private var isRunning = false
 
     // Frame processing mutex
@@ -212,13 +213,14 @@ class HandTrackingManager: NSObject {
             thumbExtended = false
         }
 
-        // A cursor is available only for an intentional one-finger point:
-        // index extended, all other fingers curled.
-        let isPointing = indexExtended && middleCurled && ringCurled && littleCurled
-
         // A window grab needs a real closed fist. A partly open hand, an
         // incomplete pinch, or a sideways point cannot satisfy this test.
         let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
+
+        // Index extension is the only requirement for pointing. Do not gate
+        // it on the other fingers: their confidence drops first when a hand
+        // is sideways, which previously made the cursor disappear.
+        let isPointing = indexExtended && !isFist
 
         // An open palm is deliberately unused by the pointer and grab modes,
         // making it a reliable one-hand reset gesture.
@@ -248,9 +250,23 @@ class HandTrackingManager: NSObject {
             self.isGrabbing = isFist
             self.grabPosition = wristPos
 
-            let resetRequested = isOpenPalm && !self.resetCooldown
+            if isOpenPalm {
+                if self.openPalmStartedAt == nil {
+                    self.openPalmStartedAt = Date()
+                }
+            } else {
+                self.openPalmStartedAt = nil
+            }
+
+            // Hold an open palm for one second to reset. A quick open hand
+            // remains available for ordinary index-finger pointing.
+            let openPalmHeldLongEnough = self.openPalmStartedAt.map {
+                Date().timeIntervalSince($0) >= 1.0
+            } ?? false
+            let resetRequested = openPalmHeldLongEnough && !self.resetCooldown
             if resetRequested {
                 self.resetCooldown = true
+                self.openPalmStartedAt = nil
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.resetCooldown = false
                 }

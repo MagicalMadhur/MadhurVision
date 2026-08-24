@@ -22,26 +22,23 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
         super.init()
     }
 
-    func start(scene: SCNScene) {
-        self.scene = scene
-        guard !captureSession.isRunning else { return }
-        
-        if isConfigured {
-            processingQueue.async {
-                self.captureSession.startRunning()
-            }
-            return
-        }
-        
+    /// Configures camera connections before any preview layer is created.
+    /// AVCaptureVideoPreviewLayer only auto-connects to inputs that already
+    /// exist, so preparing here prevents one eye from getting a nil preview
+    /// connection while the other happens to connect later.
+    @discardableResult
+    func prepare() -> Bool {
+        guard !isConfigured else { return true }
         isConfigured = true
-
         captureSession.beginConfiguration()
         captureSession.sessionPreset = .hd1280x720
 
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               let input = try? AVCaptureDeviceInput(device: device) else {
+            captureSession.commitConfiguration()
+            isConfigured = false
             print("[PassthroughManager] Could not access rear camera")
-            return
+            return false
         }
 
         if captureSession.canAddInput(input) {
@@ -68,6 +65,13 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
         } catch {
             print("[PassthroughManager] Could not configure framerate")
         }
+
+        return true
+    }
+
+    func start(scene: SCNScene) {
+        self.scene = scene
+        guard prepare(), !captureSession.isRunning else { return }
 
         processingQueue.async {
             self.captureSession.startRunning()

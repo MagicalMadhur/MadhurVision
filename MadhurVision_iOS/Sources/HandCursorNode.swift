@@ -1,7 +1,7 @@
 import SceneKit
 import UIKit
 
-/// A glowing sphere that follows the user's index finger tip in 3D space,
+/// A high-contrast mouse arrow that follows the user's index finger tip in 3D space,
 /// and raycasts against the browser window to drive click/scroll interactions.
 class HandCursorNode: SCNNode {
 
@@ -9,7 +9,7 @@ class HandCursorNode: SCNNode {
     var onClick: ((SCNHitTestResult) -> Void)?
     var onScroll: ((SCNHitTestResult, CGFloat) -> Void)?
 
-    // The glowing dot
+    // The visible pointer
     private let dotNode = SCNNode()
 
     override init() {
@@ -22,17 +22,49 @@ class HandCursorNode: SCNNode {
     }
 
     private func setupCursor() {
-        // Small glowing sphere
-        let sphere = SCNSphere(radius: 0.015)
+        let plane = SCNPlane(width: 0.05, height: 0.065)
         let material = SCNMaterial()
-        material.diffuse.contents  = UIColor.white
-        material.emission.contents = UIColor.cyan  // glow
+        let pointerImage = createPointerImage()
+        material.diffuse.contents = pointerImage
+        material.transparent.contents = pointerImage
+        material.emission.contents = UIColor(white: 1.0, alpha: 0.35)
         material.lightingModel = .constant
-        sphere.materials = [material]
+        material.isDoubleSided = true
+        material.readsFromDepthBuffer = false
+        material.writesToDepthBuffer = false
+        plane.materials = [material]
 
-        dotNode.geometry = sphere
-        dotNode.isHidden = true  // hidden until hand detected
+        dotNode.geometry = plane
+        // Anchor the arrow tip at the raycast point instead of its centre.
+        dotNode.pivot = SCNMatrix4MakeTranslation(-0.025, 0.0325, 0)
+        let billboard = SCNBillboardConstraint()
+        billboard.freeAxes = .all
+        dotNode.constraints = [billboard]
+        dotNode.isHidden = true
         addChildNode(dotNode)
+    }
+
+    private func createPointerImage() -> UIImage {
+        let size = CGSize(width: 128, height: 160)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: 12, y: 10))
+            path.addLine(to: CGPoint(x: 12, y: 116))
+            path.addLine(to: CGPoint(x: 42, y: 86))
+            path.addLine(to: CGPoint(x: 67, y: 145))
+            path.addLine(to: CGPoint(x: 88, y: 136))
+            path.addLine(to: CGPoint(x: 63, y: 77))
+            path.addLine(to: CGPoint(x: 112, y: 77))
+            path.close()
+
+            context.cgContext.setFillColor(UIColor.white.cgColor)
+            context.cgContext.setStrokeColor(UIColor.black.cgColor)
+            context.cgContext.setLineWidth(9)
+            context.cgContext.setLineJoin(.round)
+            context.cgContext.addPath(path.cgPath)
+            context.cgContext.drawPath(using: .fillStroke)
+        }
     }
 
     private var smoothedFingerPos: CGPoint? = nil
@@ -99,7 +131,12 @@ class HandCursorNode: SCNNode {
         if let hit = hits.first(where: { $0.node !== self && $0.node !== dotNode }) {
             // Cursor is hitting an object in the world
             dotNode.isHidden = false
-            dotNode.worldPosition = hit.worldCoordinates
+            let normal = hit.node.convertVector(hit.localNormal, to: nil)
+            dotNode.worldPosition = SCNVector3(
+                hit.worldCoordinates.x + normal.x * 0.008,
+                hit.worldCoordinates.y + normal.y * 0.008,
+                hit.worldCoordinates.z + normal.z * 0.008
+            )
             
             // Only fire click once per pinch (rising edge trigger)
             if isPinching && !previousIsPinching {
@@ -112,8 +149,11 @@ class HandCursorNode: SCNNode {
                 onScroll?(hit, scrollDelta)
             }
         } else {
-            // Cursor not on browser — hide or float in air
-            dotNode.isHidden = true
+            // Keep the arrow visible even when the ray misses the panel. This
+            // makes it clear that index tracking is active; it simply cannot
+            // click until the arrow reaches an interactive surface.
+            dotNode.isHidden = false
+            dotNode.worldPosition = rayEnd
         }
         
         previousIsPinching = isPinching
