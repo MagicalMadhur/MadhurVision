@@ -11,21 +11,32 @@ struct StandaloneVRView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            // Side-by-side (SBS) Stereoscopic Views
-            HStack(spacing: 0) {
-                SceneView(
-                    scene: vrEngine.scene,
-                    pointOfView: vrEngine.leftCameraNode,
-                    options: [.rendersContinuously]
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
-                SceneView(
-                    scene: vrEngine.scene,
-                    pointOfView: vrEngine.rightCameraNode,
-                    options: [.rendersContinuously]
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    // Left Eye
+                    SceneView(
+                        scene: vrEngine.scene,
+                        pointOfView: vrEngine.leftCameraNode,
+                        options: [.rendersContinuously]
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onTapGesture { location in
+                        let size = CGSize(width: geo.size.width / 2.0, height: geo.size.height)
+                        vrEngine.handleDirectScreenTap(location: location, isLeftEye: true, size: size)
+                    }
+                    
+                    // Right Eye
+                    SceneView(
+                        scene: vrEngine.scene,
+                        pointOfView: vrEngine.rightCameraNode,
+                        options: [.rendersContinuously]
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onTapGesture { location in
+                        let size = CGSize(width: geo.size.width / 2.0, height: geo.size.height)
+                        vrEngine.handleDirectScreenTap(location: location, isLeftEye: false, size: size)
+                    }
+                }
             }
             .ignoresSafeArea()
             
@@ -144,6 +155,39 @@ class VREngine: ObservableObject {
         browserScale = max(0.3, min(2.0, browserScale + delta))
         let s = Float(browserScale)
         browserNode?.scale = SCNVector3(s, s, s)
+    }
+    
+    // MARK: - Direct Screen Taps (Fallback for AssistiveTouch)
+    
+    func handleDirectScreenTap(location: CGPoint, isLeftEye: Bool, size: CGSize) {
+        let cameraNode = isLeftEye ? leftCameraNode : rightCameraNode
+        
+        // Convert screen coordinate to normalized device coordinates (-1 to 1)
+        let ndcX = Float(location.x / size.width) * 2.0 - 1.0
+        let ndcY = -(Float(location.y / size.height) * 2.0 - 1.0)
+        
+        // Cast ray into the scene
+        let rayDirection = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.0)
+        let worldOrigin = cameraNode.worldPosition
+        let worldDirection = cameraNode.convertVector(rayDirection, to: nil)
+        
+        let rayEnd = SCNVector3(
+            worldOrigin.x + worldDirection.x,
+            worldOrigin.y + worldDirection.y,
+            worldOrigin.z + worldDirection.z
+        )
+        
+        let hits = scene.rootNode.hitTestWithSegment(
+            from: worldOrigin,
+            to: rayEnd,
+            options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
+        )
+        
+        if let hit = hits.first(where: { $0.node === browserNode }) {
+            let uv = CGPoint(x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
+                             y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y))
+            browserNode?.simulateClick(at: uv)
+        }
     }
     
     // MARK: - Scene Setup
