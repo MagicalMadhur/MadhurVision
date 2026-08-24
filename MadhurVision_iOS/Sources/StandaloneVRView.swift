@@ -40,40 +40,54 @@ struct StandaloneVRView: View {
             }
             .ignoresSafeArea()
             
-            // Back + Window Size Controls (overlaid on left eye)
+            // Top HUD Controls (overlaid for easy access)
             VStack {
-                HStack(spacing: 12) {
+                HStack(spacing: 14) {
                     // Exit button
                     Button(action: {
                         vrEngine.stop()
                         appState.currentMode = .home
                     }) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white.opacity(0.4))
+                            .font(.system(size: 26))
+                            .foregroundColor(.white.opacity(0.6))
                     }
                     
                     Spacer()
                     
+                    // Recalibrate Center Button
+                    Button(action: { vrEngine.recalibrateView() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "scope")
+                            Text("Center")
+                        }
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.5))
+                        .foregroundColor(.cyan)
+                        .cornerRadius(8)
+                    }
+                    
                     // Window size controls (projector-style scale)
                     Button(action: { vrEngine.scaleMonitor(by: -0.15) }) {
                         Image(systemName: "minus.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.white.opacity(0.5))
+                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(0.6))
                     }
                     
                     Text(String(format: "%.0f%%", vrEngine.monitorScale * 100))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundColor(.cyan)
                     
                     Button(action: { vrEngine.scaleMonitor(by: 0.15) }) {
                         Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.white.opacity(0.5))
+                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(0.6))
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
                 
                 Spacer()
             }
@@ -86,6 +100,7 @@ struct StandaloneVRView: View {
             .allowsHitTesting(false)
         }
         .onAppear { vrEngine.start() }
+        .onDisappear { vrEngine.stop() }
         .statusBarHidden(true)
     }
 }
@@ -94,11 +109,11 @@ struct Crosshair: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.4), lineWidth: 1)
-                .frame(width: 20, height: 20)
+                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                .frame(width: 22, height: 22)
             Circle()
-                .fill(Color.white.opacity(0.9))
-                .frame(width: 5, height: 5)
+                .fill(Color.cyan.opacity(0.8))
+                .frame(width: 4, height: 4)
         }
     }
 }
@@ -123,11 +138,11 @@ class VREngine: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     
-    // Monitor dimensions
+    // Default Monitor distance in front of user (meters)
     private let monitorDistance: Float = -2.2
     
-    // IPD
-    private let ipd: Float = 0.065
+    // Default IPD in meters (65mm)
+    private var ipd: Float = 0.065
     
     // MARK: - Lifecycle
     
@@ -150,12 +165,46 @@ class VREngine: ObservableObject {
         cancellables.removeAll()
     }
     
-    // MARK: - Scale (Projector-style: just scales the 3D node, doesn't affect internal UI)
+    // MARK: - Scale & Settings
     
     func scaleMonitor(by delta: CGFloat) {
-        monitorScale = max(0.4, min(2.5, monitorScale + delta))
+        setMonitorScale(monitorScale + delta)
+    }
+    
+    func setMonitorScale(_ newScale: CGFloat) {
+        monitorScale = max(0.4, min(2.8, newScale))
         let s = Float(monitorScale)
         monitorNode?.scale = SCNVector3(s, s, s)
+    }
+    
+    func setIPD(_ newIPD: Float) {
+        ipd = max(0.050, min(0.080, newIPD))
+        leftCameraNode.position = SCNVector3(-ipd / 2.0, 0, 0)
+        rightCameraNode.position = SCNVector3(ipd / 2.0, 0, 0)
+    }
+    
+    func setPassthrough(enabled: Bool) {
+        if enabled {
+            PassthroughManager.shared.start(scene: scene)
+        } else {
+            PassthroughManager.shared.stop()
+            scene.background.contents = UIColor.black
+        }
+    }
+    
+    // MARK: - Recalibrate Center View
+    
+    func recalibrateView() {
+        guard let monitor = monitorNode else { return }
+        // Center the monitor directly in front along the current camera yaw
+        let currentYaw = cameraRig.eulerAngles.y
+        let dist = -monitorDistance
+        
+        let targetX = -sin(currentYaw) * dist
+        let targetZ = -cos(currentYaw) * dist
+        
+        monitor.position = SCNVector3(targetX, 0.05, targetZ)
+        monitor.eulerAngles = SCNVector3(0, currentYaw, 0)
     }
     
     // MARK: - Direct Screen Taps (Fallback)
@@ -188,7 +237,6 @@ class VREngine: ObservableObject {
     }
     
     private func handleHit(_ hit: SCNHitTestResult) {
-        // All clicks go to the single monitor
         let node = hit.node
         if let monitor = monitorNode,
            node === monitor || node.parent === monitor || node.name == "monitor_border" {
@@ -208,7 +256,7 @@ class VREngine: ObservableObject {
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.intensity = 400
+        ambient.light?.intensity = 600
         scene.rootNode.addChildNode(ambient)
     }
     
@@ -235,13 +283,29 @@ class VREngine: ObservableObject {
     
     private func spawnMonitor() {
         let monitor = VRMonitorNode()
-        // Position directly in front, slightly above eye level
-        monitor.position = SCNVector3(0, 0.05, monitorDistance)
         
-        // Gentle bobbing animation
+        // Wire up settings callbacks from the Web OS
+        monitor.onScaleChanged = { [weak self] scale in
+            self?.setMonitorScale(scale)
+        }
+        monitor.onIPDChanged = { [weak self] ipd in
+            self?.setIPD(ipd)
+        }
+        monitor.onRecalibrateRequested = { [weak self] in
+            self?.recalibrateView()
+        }
+        monitor.onPassthroughToggled = { [weak self] enabled in
+            self?.setPassthrough(enabled: enabled)
+        }
+        
+        // Position directly in front at eye level
+        monitor.position = SCNVector3(0, 0.05, monitorDistance)
+        monitor.eulerAngles = SCNVector3(0, 0, 0)
+        
+        // Gentle resting float animation
         let bob = SCNAction.sequence([
-            SCNAction.moveBy(x: 0, y: 0.02, z: 0, duration: 2.5),
-            SCNAction.moveBy(x: 0, y: -0.02, z: 0, duration: 2.5)
+            SCNAction.moveBy(x: 0, y: 0.015, z: 0, duration: 2.5),
+            SCNAction.moveBy(x: 0, y: -0.015, z: 0, duration: 2.5)
         ])
         monitor.runAction(SCNAction.repeatForever(bob))
         
@@ -267,33 +331,31 @@ class VREngine: ObservableObject {
         self.mouseCursor = cursor
     }
     
-    // MARK: - Head Tracking (120Hz)
+    // MARK: - Landscape VR Head Tracking (120Hz)
     
     private var hasAlignedMonitor = false
     
     private func startHeadTracking() {
         guard motionManager.isDeviceMotionAvailable else { return }
         motionManager.deviceMotionUpdateInterval = 1.0 / 120.0
+        
+        // Use reference frame with Z vertical
         motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: OperationQueue.main) { [weak self] motion, _ in
             guard let self, let motion else { return }
-            self.cameraRig.eulerAngles = SCNVector3(
-                x: Float(motion.attitude.pitch),
-                y: Float(motion.attitude.yaw),
-                z: Float(motion.attitude.roll)
-            )
             
-            // On the very first valid tracking frame, align the monitor in front of the user
+            // In Landscape Left (phone rotated 90 deg counter-clockwise):
+            // - Tilting up/down is rotation around the phone's long axis (-roll)
+            // - Panning left/right is rotation around gravity vertical (-yaw)
+            // - Level horizon is maintained with 0 roll
+            let pitch = Float(-motion.attitude.roll)
+            let yaw   = Float(-motion.attitude.yaw)
+            
+            self.cameraRig.eulerAngles = SCNVector3(pitch, yaw, 0)
+            
+            // On startup, align monitor directly in front of the user's initial heading
             if !self.hasAlignedMonitor {
                 self.hasAlignedMonitor = true
-                
-                // Place the monitor directly in front of where the user is looking
-                // Convert the local "forward" point to world space
-                let localFront = SCNVector3(0, 0.05, self.monitorDistance)
-                let worldFront = self.cameraRig.convertPosition(localFront, to: nil)
-                self.monitorNode?.position = worldFront
-                
-                // Make the monitor face the user (only match yaw, keep it perfectly vertical)
-                self.monitorNode?.eulerAngles = SCNVector3(0, self.cameraRig.eulerAngles.y, 0)
+                self.recalibrateView()
             }
         }
     }
@@ -308,7 +370,7 @@ class VREngine: ObservableObject {
     private var isCurrentlyGrabbing = false
     private var grabOffset: SCNVector3 = SCNVector3Zero
     
-    // MARK: - Tracking
+    // MARK: - Tracking & Gestures
     
     private func startTracking() {
         HandTrackingManager.shared.start()
@@ -332,7 +394,7 @@ class VREngine: ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Combine all hand data into one stream
+        // Combine all hand tracking data into one stream
         ht.$indexTipPosition
             .combineLatest(ht.$isPinching, ht.$scrollDelta)
             .combineLatest(ht.$isGrabbing, ht.$grabPosition)
@@ -341,7 +403,7 @@ class VREngine: ObservableObject {
                 guard let self else { return }
                 let ((fingerPos, isPinching, scrollDelta), isGrabbing, grabPosition) = combined
                 
-                // Window grab & move: fist clench drags the monitor in 3D
+                // Fist Clench / Grab: drags the single monitor smoothly in 3D space
                 if isGrabbing, let monitor = self.monitorNode {
                     let sensitivity: Float = 2.5
                     let ndcX = Float(grabPosition.x * 2.0 - 1.0) * sensitivity
@@ -372,15 +434,15 @@ class VREngine: ObservableObject {
                     monitor.position.y += (targetPos.y - monitor.position.y) * 0.15
                     monitor.position.z += (targetPos.z - monitor.position.z) * 0.15
                     
-                    // Keep the monitor perfectly vertical, facing the user (only yaw)
+                    // Keep the monitor locked upright facing the user
                     monitor.eulerAngles = SCNVector3(0, self.cameraRig.eulerAngles.y, 0)
                     
-                    return  // skip cursor update while grabbing
+                    return // skip cursor raycast while grabbing
                 } else {
                     self.isCurrentlyGrabbing = false
                 }
                 
-                // Normal cursor behavior
+                // Normal Hand Cursor Update
                 self.handCursor?.update(
                     fingerPos:   fingerPos,
                     cameraNode:  self.leftCameraNode,

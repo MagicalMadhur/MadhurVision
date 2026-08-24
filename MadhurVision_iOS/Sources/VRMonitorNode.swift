@@ -3,17 +3,31 @@ import WebKit
 import UIKit
 
 /// A single unified floating monitor in VR space.
-/// Uses snapshot-based rendering for 100% reliable texture capture.
-/// Navigates the WKWebView directly (no iframes) to avoid cross-origin issues.
+/// Features:
+/// - Instant Frame 0 native render so the monitor is never transparent or blank.
+/// - Robust serial snapshot pipeline (with mutex lock) to prevent WebKit IPC starvation.
+/// - Built-in MadhurVision OS 2.0 with Google Browser, YouTube, and interactive Settings.
+/// - Projector-style scaling that maintains fixed 16:9 web resolution.
 class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
+    
+    // Callbacks to VREngine for settings
+    var onScaleChanged: ((CGFloat) -> Void)?
+    var onIPDChanged: ((Float) -> Void)?
+    var onRecalibrateRequested: (() -> Void)?
+    var onPassthroughToggled: ((Bool) -> Void)?
     
     private var webView: WKWebView!
     private let monitorWidth: CGFloat
     private let monitorHeight: CGFloat
     private var snapshotTimer: Timer?
-    private var isShowingOS = true // true = OS HTML, false = external website
+    private var isSnapshotting = false
+    private var isShowingOS = true
     
-    // Store the OS HTML so we can reload it when returning from browser
+    // Web rendering canvas dimensions (16:9)
+    static let canvasWidth: CGFloat = 1440
+    static let canvasHeight: CGFloat = 810
+    
+    // Store OS HTML for fast reload
     private static var cachedOSHTML: String?
     
     init(width: CGFloat = 2.4, height: CGFloat = 1.35) {
@@ -27,71 +41,23 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         self.geometry = plane
         self.name = "vr_monitor"
         
+        // 2. Add subtle glowing border frame
         addBorderFrame(width: width, height: height)
         
-        // 2. Initialize WKWebView
-        let resolutionMultiplier: CGFloat = 500
-        let webWidth = width * resolutionMultiplier
-        let webHeight = height * resolutionMultiplier
-        
-        let webConfig = WKWebViewConfiguration()
-        webConfig.allowsInlineMediaPlayback = true
-        webConfig.mediaTypesRequiringUserActionForPlayback = []
-        
-        // JS → Swift bridge
-        webConfig.userContentController.add(self, name: "vrOS")
-        
-        // Inject the floating dock overlay on EVERY page (including external sites)
-        let dockOverlayScript = WKUserScript(
-            source: VRMonitorNode.floatingDockJS(),
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        webConfig.userContentController.addUserScript(dockOverlayScript)
-        
-        // Inject air keyboard on every page
-        let keyboardScript = WKUserScript(
-            source: VRMonitorNode.airKeyboardJS(),
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        webConfig.userContentController.addUserScript(keyboardScript)
-        
-        webView = WKWebView(
-            frame: CGRect(x: 0, y: 0, width: webWidth, height: webHeight),
-            configuration: webConfig
-        )
-        webView.isOpaque = true
-        webView.backgroundColor = .black
-        webView.navigationDelegate = self
-        
-        // iPad user agent for desktop-class layout
-        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-        
-        // 3. Set up the material with a placeholder color (will be replaced by snapshots)
+        // 3. INSTANT FRAME 0 RENDER: Draw native OS desktop immediately onto diffuse.contents
+        // This guarantees the monitor is NEVER black or transparent from millisecond 0!
+        let initialImage = VRMonitorNode.renderInstantPlaceholder()
         let material = SCNMaterial()
-        material.diffuse.contents = UIColor.black
+        material.diffuse.contents = initialImage
         material.isDoubleSided = true
         material.lightingModel = .constant
         plane.materials = [material]
         
-        // 4. Load OS HTML
-        let osHTML = VRMonitorNode.generateOSHTML()
-        VRMonitorNode.cachedOSHTML = osHTML
-        webView.loadHTMLString(osHTML, baseURL: nil)
+        // 4. Initialize WKWebView
+        setupWebView()
         
-        // 5. Add to UIKit view hierarchy (needed for WKWebView to actually render)
-        DispatchQueue.main.async {
-            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let window = windowScene.windows.first else { return }
-            self.webView.frame = CGRect(x: 0, y: 0, width: webWidth, height: webHeight)
-            self.webView.alpha = 0.01
-            self.webView.isUserInteractionEnabled = false
-            window.addSubview(self.webView)
-            
-            // 6. Start snapshot-based rendering AFTER webView is in hierarchy
-            self.startSnapshotCapture()
-        }
+        // 5. Add to UIKit hierarchy and start snapshot pump
+        attachWebViewAndStartCapture()
     }
     
     required init?(coder: NSCoder) {
@@ -106,35 +72,111 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         webView = nil
     }
     
-    // MARK: - Snapshot-Based Rendering (THE FIX)
+    // MARK: - WebView Setup
     
-    private func startSnapshotCapture() {
-        // Wait a moment for the HTML to render before first snapshot
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.captureSnapshot() // immediate first capture
-        }
+    private func setupWebView() {
+        let webConfig = WKWebViewConfiguration()
+        webConfig.allowsInlineMediaPlayback = true
+        webConfig.mediaTypesRequiringUserActionForPlayback = []
         
-        // Then capture at ~15 FPS
-        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
-            self?.captureSnapshot()
+        // Swift <-> JS Bridge
+        webConfig.userContentController.add(self, name: "vrOS")
+        
+        // Floating Dock script (injected on external websites)
+        let dockScript = WKUserScript(
+            source: VRMonitorNode.floatingDockJS(),
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        webConfig.userContentController.addUserScript(dockScript)
+        
+        // Air Keyboard script
+        let keyboardScript = WKUserScript(
+            source: VRMonitorNode.airKeyboardJS(),
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        webConfig.userContentController.addUserScript(keyboardScript)
+        
+        webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight),
+            configuration: webConfig
+        )
+        webView.isOpaque = true
+        webView.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
+        webView.navigationDelegate = self
+        
+        // iPad Desktop Safari User Agent for standard desktop sites
+        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+        
+        // Load OS HTML
+        let osHTML = VRMonitorNode.generateOSHTML()
+        VRMonitorNode.cachedOSHTML = osHTML
+        webView.loadHTMLString(osHTML, baseURL: nil)
+    }
+    
+    private func attachWebViewAndStartCapture() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Find an active window to attach webView
+            var targetWindow: UIWindow? = nil
+            if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) as? UIWindowScene {
+                targetWindow = windowScene.windows.first
+            }
+            if targetWindow == nil {
+                targetWindow = UIApplication.shared.windows.first
+            }
+            
+            if let window = targetWindow {
+                self.webView.frame = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
+                self.webView.isUserInteractionEnabled = false
+                self.webView.alpha = 0.05 // Active in compositor without blocking 2D view
+                window.insertSubview(self.webView, at: 0)
+            }
+            
+            self.startSnapshotPipeline()
         }
     }
     
-    private func captureSnapshot() {
-        guard let webView = self.webView else { return }
+    // MARK: - Serial Snapshot Pipeline (Mutex-Protected)
+    
+    private func startSnapshotPipeline() {
+        // Initial capture after short delay for first layout pass
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.requestSnapshot()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.requestSnapshot()
+        }
+        
+        // Periodic snapshot timer (12 FPS)
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
+            self?.requestSnapshot()
+        }
+    }
+    
+    func requestSnapshot() {
+        guard let webView = self.webView, !isSnapshotting else { return }
+        isSnapshotting = true
         
         let config = WKSnapshotConfiguration()
         config.rect = webView.bounds
+        config.afterScreenUpdates = false
         
         webView.takeSnapshot(with: config) { [weak self] image, error in
-            guard let self = self, let image = image else { return }
-            DispatchQueue.main.async {
-                self.geometry?.firstMaterial?.diffuse.contents = image
+            guard let self = self else { return }
+            self.isSnapshotting = false
+            
+            if let image = image {
+                DispatchQueue.main.async {
+                    self.geometry?.firstMaterial?.diffuse.contents = image
+                }
             }
         }
     }
     
-    // MARK: - Interaction
+    // MARK: - Interaction Simulation
     
     func simulateClick(at uv: CGPoint) {
         let js = """
@@ -144,20 +186,19 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 var el = document.elementFromPoint(cssX, cssY);
                 
                 if(el) {
-                    // Visual feedback dot
+                    // Visual feedback ripple dot
                     var dot = document.createElement('div');
-                    dot.style.cssText = 'position:fixed;left:'+(cssX-4)+'px;top:'+(cssY-4)+'px;width:8px;height:8px;background:cyan;border-radius:50%;z-index:999999;pointer-events:none;opacity:0.8;';
+                    dot.style.cssText = 'position:fixed;left:'+(cssX-6)+'px;top:'+(cssY-6)+'px;width:12px;height:12px;background:rgba(0,212,255,0.9);border-radius:50%;z-index:999999;pointer-events:none;box-shadow:0 0 10px #00d4ff;transition:transform 0.3s, opacity 0.3s;';
                     document.body.appendChild(dot);
-                    setTimeout(function(){dot.remove()},400);
+                    requestAnimationFrame(function(){ dot.style.transform = 'scale(2.5)'; dot.style.opacity = '0'; });
+                    setTimeout(function(){ dot.remove(); }, 350);
                     
-                    // Full event sequence for maximum compatibility
                     var opts = {bubbles:true, cancelable:true, view:window, clientX:cssX, clientY:cssY};
                     el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({}, opts, {pointerType:'touch'})));
                     el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, opts, {pointerType:'touch'})));
                     el.dispatchEvent(new MouseEvent('click', opts));
                     if(typeof el.click === 'function') el.click();
                     
-                    // Focus inputs for keyboard
                     if(el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
                         el.focus();
                     }
@@ -165,43 +206,52 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             })();
         """
         webView?.evaluateJavaScript(js, completionHandler: nil)
+        
+        // Immediate snapshot triggers on click
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.requestSnapshot() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak self] in self?.requestSnapshot() }
     }
     
     func simulateScroll(by delta: CGFloat) {
-        let pixels = delta * 600
-        let js = "window.scrollBy(0, \(pixels));"
+        let pixels = delta * 500
+        let js = "window.scrollBy({top: \(pixels), behavior: 'smooth'});"
         webView?.evaluateJavaScript(js, completionHandler: nil)
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.requestSnapshot() }
     }
     
-    // MARK: - Navigation (Direct, no iframes)
+    // MARK: - Navigation
     
-    /// Navigate to an external URL (browser mode)
     func navigateTo(url: URL) {
         isShowingOS = false
         webView?.load(URLRequest(url: url))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.requestSnapshot() }
     }
     
-    /// Go back to the OS home screen
     func goHome() {
         isShowingOS = true
         if let html = VRMonitorNode.cachedOSHTML {
             webView?.loadHTMLString(html, baseURL: nil)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
     
     func goBack() {
         webView?.goBack()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
     
     func goForward() {
         webView?.goForward()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
     
     func reload() {
         webView?.reload()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
     
-    // MARK: - WKScriptMessageHandler
+    // MARK: - WKScriptMessageHandler (JS -> Swift Bridge)
     
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
@@ -211,9 +261,13 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         switch action {
         case "navigate":
             if let urlStr = body["url"] as? String {
-                var finalURL = urlStr
+                var finalURL = urlStr.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !finalURL.hasPrefix("http://") && !finalURL.hasPrefix("https://") {
-                    finalURL = "https://www.google.com/search?q=" + (finalURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? finalURL)
+                    if finalURL.contains(".") && !finalURL.contains(" ") {
+                        finalURL = "https://" + finalURL
+                    } else {
+                        finalURL = "https://www.google.com/search?q=" + (finalURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? finalURL)
+                    }
                 }
                 if let url = URL(string: finalURL) {
                     navigateTo(url: url)
@@ -227,6 +281,20 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             goForward()
         case "reload":
             reload()
+        case "setScale":
+            if let scale = body["scale"] as? Double {
+                onScaleChanged?(CGFloat(scale))
+            }
+        case "setIPD":
+            if let ipd = body["ipd"] as? Double {
+                onIPDChanged?(Float(ipd) / 1000.0) // convert mm to meters
+            }
+        case "recalibrate":
+            onRecalibrateRequested?()
+        case "togglePassthrough":
+            if let enabled = body["enabled"] as? Bool {
+                onPassthroughToggled?(enabled)
+            }
         default:
             break
         }
@@ -235,21 +303,25 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     // MARK: - WKNavigationDelegate
     
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // After any page loads, take a snapshot immediately
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.captureSnapshot()
+        requestSnapshot()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.requestSnapshot()
         }
     }
     
-    // MARK: - Visual Polish
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        requestSnapshot()
+    }
+    
+    // MARK: - Border Frame
     
     private func addBorderFrame(width: CGFloat, height: CGFloat) {
-        let borderPlane = SCNPlane(width: width + 0.03, height: height + 0.03)
+        let borderPlane = SCNPlane(width: width + 0.04, height: height + 0.04)
         borderPlane.cornerRadius = 0.05
         
         let borderMaterial = SCNMaterial()
-        borderMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.08)
-        borderMaterial.emission.contents = UIColor(red: 0.3, green: 0.7, blue: 1.0, alpha: 0.4)
+        borderMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.06)
+        borderMaterial.emission.contents = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.5) // Sleek cyan glow
         borderMaterial.lightingModel = .constant
         borderMaterial.isDoubleSided = true
         borderPlane.materials = [borderMaterial]
@@ -260,69 +332,124 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         addChildNode(borderNode)
     }
     
-    // MARK: - Floating Dock Overlay (injected on external websites)
+    // MARK: - Instant Frame 0 Placeholder Renderer
+    
+    private static func renderInstantPlaceholder() -> UIImage {
+        let size = CGSize(width: canvasWidth, height: canvasHeight)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            let rect = CGRect(origin: .zero, size: size)
+            
+            // Gradient Background
+            let colors = [
+                UIColor(red: 0.04, green: 0.06, blue: 0.12, alpha: 1.0).cgColor,
+                UIColor(red: 0.08, green: 0.05, blue: 0.16, alpha: 1.0).cgColor
+            ]
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0.0, 1.0]) {
+                ctx.cgContext.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+            
+            // Sidebar Dock background
+            let dockRect = CGRect(x: 0, y: 0, width: 80, height: size.height)
+            UIColor(white: 1.0, alpha: 0.06).setFill()
+            UIRectFill(dockRect)
+            
+            // Logo & Title
+            let title = "MadhurVision OS"
+            let titleAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 48, weight: .bold),
+                .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0)
+            ]
+            let titleSize = title.size(withAttributes: titleAttrs)
+            title.draw(at: CGPoint(x: (size.width - titleSize.width) / 2.0 + 40, y: size.height * 0.35), withAttributes: titleAttrs)
+            
+            let sub = "Initializing High-Speed VR Environment..."
+            let subAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 22, weight: .medium),
+                .foregroundColor: UIColor(white: 1.0, alpha: 0.6)
+            ]
+            let subSize = sub.size(withAttributes: subAttrs)
+            sub.draw(at: CGPoint(x: (size.width - subSize.width) / 2.0 + 40, y: size.height * 0.35 + 65), withAttributes: subAttrs)
+        }
+    }
+    
+    // MARK: - Floating Dock JS (Overlay on external websites)
     
     private static func floatingDockJS() -> String {
         return """
         (function() {
-            // Don't inject on our own OS HTML
             if (document.getElementById('loading-screen') || document.getElementById('desktop')) return;
-            
-            // Don't double-inject
             if (document.getElementById('vr-floating-dock')) return;
             
             var dock = document.createElement('div');
             dock.id = 'vr-floating-dock';
-            dock.innerHTML = '<div class="vfd-btn" id="vfd-home">🏠</div><div class="vfd-btn" id="vfd-back">◀</div><div class="vfd-btn" id="vfd-fwd">▶</div><div class="vfd-btn" id="vfd-reload">↻</div>';
+            dock.innerHTML = `
+                <div class="vfd-btn" id="vfd-home" title="OS Home">🏠</div>
+                <div class="vfd-btn" id="vfd-back" title="Back">◀</div>
+                <div class="vfd-btn" id="vfd-fwd" title="Forward">▶</div>
+                <div class="vfd-btn" id="vfd-reload" title="Refresh">↻</div>
+            `;
             
             var style = document.createElement('style');
             style.textContent = `
                 #vr-floating-dock {
                     position: fixed;
-                    left: 8px;
+                    left: 12px;
                     top: 50%;
                     transform: translateY(-50%);
                     display: flex;
                     flex-direction: column;
-                    gap: 6px;
+                    gap: 10px;
                     z-index: 2147483647;
-                    pointer-events: auto;
+                    background: rgba(10, 15, 25, 0.85);
+                    padding: 8px;
+                    border-radius: 16px;
+                    border: 1px solid rgba(0, 212, 255, 0.3);
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+                    backdrop-filter: blur(10px);
                 }
                 .vfd-btn {
-                    width: 40px;
-                    height: 40px;
-                    background: rgba(0,0,0,0.7);
-                    border: 1px solid rgba(255,255,255,0.2);
-                    border-radius: 10px;
+                    width: 44px;
+                    height: 44px;
+                    background: rgba(255,255,255,0.08);
+                    border: 1px solid rgba(255,255,255,0.15);
+                    border-radius: 12px;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    font-size: 18px;
+                    font-size: 20px;
                     cursor: pointer;
                     color: white;
+                    user-select: none;
+                    transition: all 0.2s;
                 }
-                .vfd-btn:hover { background: rgba(0,0,0,0.9); }
+                .vfd-btn:hover { background: rgba(0, 212, 255, 0.25); border-color: #00d4ff; transform: scale(1.08); }
             `;
             document.head.appendChild(style);
             document.body.appendChild(dock);
             
-            document.getElementById('vfd-home').addEventListener('click', function() {
+            document.getElementById('vfd-home').addEventListener('click', function(e) {
+                e.stopPropagation();
                 window.webkit.messageHandlers.vrOS.postMessage({action:'goHome'});
             });
-            document.getElementById('vfd-back').addEventListener('click', function() {
+            document.getElementById('vfd-back').addEventListener('click', function(e) {
+                e.stopPropagation();
                 window.webkit.messageHandlers.vrOS.postMessage({action:'goBack'});
             });
-            document.getElementById('vfd-fwd').addEventListener('click', function() {
+            document.getElementById('vfd-fwd').addEventListener('click', function(e) {
+                e.stopPropagation();
                 window.webkit.messageHandlers.vrOS.postMessage({action:'goForward'});
             });
-            document.getElementById('vfd-reload').addEventListener('click', function() {
+            document.getElementById('vfd-reload').addEventListener('click', function(e) {
+                e.stopPropagation();
                 window.webkit.messageHandlers.vrOS.postMessage({action:'reload'});
             });
         })();
         """
     }
     
-    // MARK: - Air Keyboard JS (injected on every page)
+    // MARK: - Air Keyboard JS
     
     private static func airKeyboardJS() -> String {
         return """
@@ -333,41 +460,41 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             style.textContent = `
                 #vr-air-keyboard {
                     position: fixed;
-                    bottom: -50%;
+                    bottom: -60%;
                     left: 50%;
                     transform: translateX(-50%);
-                    width: 88%;
-                    max-width: 900px;
-                    background: rgba(20, 20, 30, 0.96);
-                    border-radius: 16px 16px 0 0;
-                    padding: 12px;
+                    width: 90%;
+                    max-width: 960px;
+                    background: rgba(14, 20, 32, 0.96);
+                    border: 1px solid rgba(0, 212, 255, 0.3);
+                    border-radius: 20px 20px 0 0;
+                    padding: 16px;
                     display: flex;
                     flex-direction: column;
-                    gap: 6px;
+                    gap: 8px;
                     z-index: 2147483646;
                     transition: bottom 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-                    box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
-                    border: 1px solid rgba(255,255,255,0.1);
-                    border-bottom: none;
+                    box-shadow: 0 -10px 50px rgba(0,0,0,0.8);
                 }
                 #vr-air-keyboard.visible { bottom: 0; }
-                .kb-row { display:flex; justify-content:center; gap:5px; }
+                .kb-row { display:flex; justify-content:center; gap:6px; }
                 .kb-key {
-                    background: rgba(255,255,255,0.12);
+                    background: rgba(255,255,255,0.1);
                     border: 1px solid rgba(255,255,255,0.15);
                     color: white;
-                    font-size: 16px;
+                    font-size: 18px;
                     font-family: -apple-system, sans-serif;
                     font-weight: 500;
-                    padding: 10px 0;
+                    padding: 12px 0;
                     flex: 1;
-                    border-radius: 7px;
+                    border-radius: 8px;
                     text-align: center;
                     cursor: pointer;
+                    user-select: none;
                 }
-                .kb-key:active { background: rgba(255,255,255,0.35); transform: scale(0.95); }
-                .kb-key.wide { flex: 1.5; }
-                .kb-key.space { flex: 5; }
+                .kb-key:active { background: rgba(0,212,255,0.4); transform: scale(0.95); }
+                .kb-key.wide { flex: 1.6; background: rgba(0,212,255,0.15); }
+                .kb-key.space { flex: 5.5; }
             `;
             document.head.appendChild(style);
             
@@ -379,7 +506,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 ['Q','W','E','R','T','Y','U','I','O','P'],
                 ['A','S','D','F','G','H','J','K','L'],
                 ['Z','X','C','V','B','N','M','DEL'],
-                ['@','.com','SPACE','.','GO']
+                ['https://','@','.com','SPACE','.','GO']
             ];
             
             layout.forEach(function(row) {
@@ -388,10 +515,11 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 row.forEach(function(key) {
                     var btn = document.createElement('div');
                     btn.className = 'kb-key';
-                    if (key === 'SPACE') { btn.classList.add('space'); btn.textContent = '⎵'; }
+                    if (key === 'SPACE') { btn.classList.add('space'); btn.textContent = 'Space'; }
                     else if (key === 'DEL') { btn.classList.add('wide'); btn.textContent = '⌫'; }
-                    else if (key === 'GO') { btn.classList.add('wide'); btn.textContent = 'GO'; }
+                    else if (key === 'GO') { btn.classList.add('wide'); btn.textContent = '↵ Search'; }
                     else if (key === '.com') { btn.classList.add('wide'); btn.textContent = '.com'; }
+                    else if (key === 'https://') { btn.classList.add('wide'); btn.textContent = 'https://'; }
                     else { btn.textContent = key; }
                     
                     btn.addEventListener('mousedown', function(e) { e.preventDefault(); });
@@ -404,10 +532,15 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                         else if (key === 'SPACE') { el.value += ' '; }
                         else if (key === 'GO') {
                             if (el.form) { el.form.submit(); }
+                            else {
+                                var ev = new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true});
+                                el.dispatchEvent(ev);
+                            }
                             el.blur();
                             return;
                         }
                         else if (key === '.com') { el.value += '.com'; }
+                        else if (key === 'https://') { el.value += 'https://'; }
                         else if (key === '@') { el.value += '@'; }
                         else if (key === '.') { el.value += '.'; }
                         else { el.value += key.toLowerCase(); }
@@ -431,13 +564,13 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 setTimeout(function() {
                     var kb = document.getElementById('vr-air-keyboard');
                     if (kb) kb.classList.remove('visible');
-                }, 200);
+                }, 250);
             });
         })();
         """
     }
     
-    // MARK: - OS HTML
+    // MARK: - MadhurVision OS 2.0 Full HTML/CSS/JS
     
     private static func generateOSHTML() -> String {
         return """
@@ -446,12 +579,12 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>MadhurVision OS</title>
+        <title>MadhurVision OS 2.0</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
-                font-family: -apple-system, 'Helvetica Neue', sans-serif;
-                background: #0a0a0f;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #080b14;
                 color: #fff;
                 width: 100vw;
                 height: 100vh;
@@ -460,154 +593,257 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 -webkit-user-select: none;
             }
             
-            /* ===== LOADING SCREEN ===== */
+            /* Loading Screen */
             #loading-screen {
                 position: fixed;
                 inset: 0;
-                background: rgba(10, 10, 20, 0.50);
+                background: radial-gradient(circle at center, #10192e 0%, #080b14 100%);
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 z-index: 10000;
-                transition: opacity 0.6s ease;
+                transition: opacity 0.5s ease;
             }
             #loading-screen.hidden { opacity: 0; pointer-events: none; }
             .loading-title {
-                font-size: 64px;
-                font-weight: 700;
-                letter-spacing: 3px;
-                background: linear-gradient(135deg, #00d4ff, #7b2ff7, #ff6ec7);
+                font-size: 60px;
+                font-weight: 800;
+                letter-spacing: 2px;
+                background: linear-gradient(135deg, #00d4ff, #7b2ff7, #ff007f);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
-                margin-bottom: 20px;
+                margin-bottom: 12px;
             }
             .loading-sub {
-                font-size: 22px;
-                color: rgba(255,255,255,0.5);
-                margin-bottom: 40px;
+                font-size: 20px;
+                color: rgba(255,255,255,0.6);
+                margin-bottom: 36px;
             }
             .loading-bar-track {
-                width: 300px; height: 4px;
+                width: 320px; height: 6px;
                 background: rgba(255,255,255,0.1);
-                border-radius: 2px; overflow: hidden;
+                border-radius: 3px; overflow: hidden;
             }
             .loading-bar-fill {
                 height: 100%; width: 0%;
                 background: linear-gradient(90deg, #00d4ff, #7b2ff7);
-                border-radius: 2px;
-                animation: loadFill 2.5s ease-out forwards;
+                border-radius: 3px;
+                animation: loadFill 1.8s cubic-bezier(0.1, 0.7, 0.1, 1) forwards;
             }
-            @keyframes loadFill { 0%{width:0%} 60%{width:70%} 100%{width:100%} }
+            @keyframes loadFill { 0%{width:0%} 100%{width:100%} }
             
-            /* ===== DESKTOP ===== */
+            /* Desktop Layout */
             #desktop {
-                display: none; width: 100%; height: 100%;
+                display: none;
+                width: 100%;
+                height: 100%;
             }
             #desktop.visible { display: flex; }
             
-            /* Dock */
+            /* Sidebar Dock */
             #dock {
-                width: 72px; height: 100%;
-                background: rgba(255,255,255,0.04);
-                border-right: 1px solid rgba(255,255,255,0.08);
-                display: flex; flex-direction: column;
-                align-items: center; padding: 16px 0; gap: 8px;
+                width: 80px;
+                height: 100%;
+                background: rgba(14, 20, 32, 0.75);
+                border-right: 1px solid rgba(0, 212, 255, 0.15);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 20px 0;
+                gap: 16px;
                 flex-shrink: 0;
+                backdrop-filter: blur(12px);
             }
-            .dock-item { display:flex; flex-direction:column; align-items:center; gap:2px; }
+            .dock-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 4px;
+                cursor: pointer;
+            }
             .dock-icon {
-                width: 52px; height: 52px; border-radius: 14px;
-                display: flex; align-items: center; justify-content: center;
-                font-size: 26px; cursor: pointer;
+                width: 56px;
+                height: 56px;
+                border-radius: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 28px;
                 background: rgba(255,255,255,0.06);
-                border: 1px solid transparent;
+                border: 1px solid rgba(255,255,255,0.1);
                 transition: all 0.2s ease;
             }
-            .dock-icon:hover { background: rgba(255,255,255,0.12); transform: scale(1.08); }
-            .dock-icon.active {
-                background: rgba(0,212,255,0.15);
-                border-color: rgba(0,212,255,0.4);
-                box-shadow: 0 0 12px rgba(0,212,255,0.2);
+            .dock-item:hover .dock-icon {
+                background: rgba(0, 212, 255, 0.2);
+                border-color: #00d4ff;
+                transform: scale(1.08);
             }
-            .dock-label { font-size: 9px; color: rgba(255,255,255,0.5); text-align: center; }
+            .dock-icon.active {
+                background: rgba(0, 212, 255, 0.25);
+                border-color: #00d4ff;
+                box-shadow: 0 0 16px rgba(0, 212, 255, 0.4);
+            }
+            .dock-label { font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 500; }
             .dock-spacer { flex: 1; }
             
-            /* Main Area */
-            #main-area { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+            /* Main Content Area */
+            #main-area {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                background: radial-gradient(ellipse at 50% 0%, #111e38 0%, #080b14 70%);
+            }
             
-            /* Top Bar */
+            /* Top Navigation Bar */
             #top-bar {
-                height: 36px;
+                height: 48px;
                 background: rgba(255,255,255,0.03);
-                border-bottom: 1px solid rgba(255,255,255,0.06);
-                display: flex; align-items: center; padding: 0 14px; gap: 10px;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                display: flex;
+                align-items: center;
+                padding: 0 20px;
+                gap: 16px;
                 flex-shrink: 0;
             }
-            .top-bar-title { font-size:13px; font-weight:600; color:rgba(255,255,255,0.7); }
-            .top-bar-spacer { flex:1; }
-            .top-bar-clock { font-size:12px; color:rgba(255,255,255,0.4); font-variant-numeric:tabular-nums; }
+            .top-title { font-size: 16px; font-weight: 700; color: rgba(255,255,255,0.9); }
+            .top-spacer { flex: 1; }
+            .top-badge {
+                font-size: 12px;
+                padding: 4px 10px;
+                border-radius: 20px;
+                background: rgba(0,212,255,0.12);
+                border: 1px solid rgba(0,212,255,0.3);
+                color: #00d4ff;
+                font-weight: 600;
+            }
+            .top-clock { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.7); }
             
-            /* URL Bar */
+            /* Omnibar */
             #url-bar-container {
-                display: none; height: 40px;
-                background: rgba(255,255,255,0.03);
-                border-bottom: 1px solid rgba(255,255,255,0.06);
-                padding: 4px 14px; gap: 8px; align-items: center; flex-shrink: 0;
+                height: 52px;
+                background: rgba(14, 20, 32, 0.6);
+                border-bottom: 1px solid rgba(0, 212, 255, 0.15);
+                padding: 6px 20px;
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                flex-shrink: 0;
             }
-            #url-bar-container.visible { display: flex; }
             .nav-btn {
-                width:30px; height:30px; border-radius:8px;
-                background: rgba(255,255,255,0.06); border:none;
-                color: rgba(255,255,255,0.6); font-size:16px; cursor:pointer;
-                display:flex; align-items:center; justify-content:center;
+                width: 38px; height: 38px; border-radius: 10px;
+                background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+                color: white; font-size: 16px; cursor: pointer;
+                display: flex; align-items: center; justify-content: center;
+                transition: all 0.2s;
             }
-            .nav-btn:hover { background: rgba(255,255,255,0.12); }
+            .nav-btn:hover { background: rgba(0,212,255,0.25); border-color: #00d4ff; }
             #url-input {
-                flex:1; height:30px; background:rgba(255,255,255,0.06);
-                border:1px solid rgba(255,255,255,0.1); border-radius:8px;
-                color:#fff; font-size:13px; padding:0 12px; outline:none;
+                flex: 1; height: 38px;
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 10px;
+                color: #fff;
+                font-size: 15px;
+                padding: 0 16px;
+                outline: none;
+                transition: all 0.2s;
             }
-            #url-input:focus { border-color:rgba(0,212,255,0.5); background:rgba(255,255,255,0.08); }
-            
-            /* Content */
-            #active-content { flex:1; overflow:hidden; position:relative; }
-            .content-view { display:none; width:100%; height:100%; position:absolute; inset:0; }
-            .content-view.active { display:flex; flex-direction:column; }
-            
-            /* Home */
-            #home-view { align-items:center; justify-content:center; gap:24px; }
-            #home-view .home-logo {
-                font-size:80px; font-weight:700;
-                background: linear-gradient(135deg, #00d4ff, #7b2ff7);
-                -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+            #url-input:focus { border-color: #00d4ff; background: rgba(0,212,255,0.1); box-shadow: 0 0 12px rgba(0,212,255,0.3); }
+            .go-btn {
+                padding: 0 20px; height: 38px;
+                background: linear-gradient(135deg, #00d4ff, #0077ff);
+                border: none; border-radius: 10px;
+                color: white; font-weight: 700; font-size: 14px;
+                cursor: pointer;
             }
-            #home-view .home-subtitle { font-size:18px; color:rgba(255,255,255,0.35); }
+            .go-btn:hover { transform: scale(1.04); }
             
-            /* Browser placeholder */
-            #browser-view { align-items:center; justify-content:center; gap:20px; }
-            #browser-view .browser-msg {
-                font-size: 20px; color: rgba(255,255,255,0.6); text-align: center;
+            /* Content Area */
+            #active-content { flex: 1; overflow-y: auto; position: relative; padding: 24px 30px; }
+            .content-view { display: none; width: 100%; height: 100%; }
+            .content-view.active { display: block; }
+            
+            /* Home Grid */
+            .home-hero { text-align: center; margin: 20px 0 35px; }
+            .home-logo-text {
+                font-size: 56px; font-weight: 800;
+                background: linear-gradient(135deg, #00d4ff, #a259ff);
+                -webkit-background-clip: text; -webkit-text-fill-color: transparent;
             }
+            .home-desc { font-size: 18px; color: rgba(255,255,255,0.5); margin-top: 6px; }
             
-            /* Settings */
-            #settings-view { padding:30px; overflow-y:auto; gap:16px; }
-            .settings-title { font-size:28px; font-weight:700; margin-bottom:10px; }
+            .app-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 20px;
+                max-width: 1000px;
+                margin: 0 auto;
+            }
+            .app-card {
+                background: rgba(255,255,255,0.05);
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 18px;
+                padding: 24px 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 12px;
+                cursor: pointer;
+                transition: all 0.25s ease;
+            }
+            .app-card:hover {
+                background: rgba(0, 212, 255, 0.15);
+                border-color: #00d4ff;
+                transform: translateY(-4px);
+                box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2);
+            }
+            .app-card-icon { font-size: 44px; }
+            .app-card-title { font-size: 18px; font-weight: 700; }
+            .app-card-desc { font-size: 12px; color: rgba(255,255,255,0.5); text-align: center; }
+            
+            /* Settings View */
+            .settings-container { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
             .settings-group {
-                background:rgba(255,255,255,0.04); border-radius:14px;
-                padding:16px 20px; border:1px solid rgba(255,255,255,0.06);
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 18px;
+                padding: 20px 24px;
             }
             .settings-group-title {
-                font-size:12px; text-transform:uppercase; letter-spacing:1px;
-                color:rgba(0,212,255,0.7); margin-bottom:14px;
+                font-size: 13px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: 1.5px; color: #00d4ff; margin-bottom: 16px;
             }
             .settings-row {
-                display:flex; align-items:center; justify-content:space-between;
-                padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.04);
+                display: flex; align-items: center; justify-content: space-between;
+                padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
             }
-            .settings-row:last-child { border-bottom:none; }
-            .settings-row-label { font-size:15px; color:rgba(255,255,255,0.8); }
-            .settings-row-value { font-size:14px; color:rgba(255,255,255,0.4); }
+            .settings-row:last-child { border-bottom: none; }
+            .row-info h4 { font-size: 16px; font-weight: 600; }
+            .row-info p { font-size: 13px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+            
+            .preset-btn-group { display: flex; gap: 8px; }
+            .preset-btn {
+                padding: 8px 14px; border-radius: 10px;
+                background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+                color: white; font-size: 13px; font-weight: 600; cursor: pointer;
+            }
+            .preset-btn.active { background: #00d4ff; color: #000; border-color: #00d4ff; font-weight: 700; }
+            
+            .slider-ctrl { display: flex; align-items: center; gap: 12px; }
+            .slider-ctrl input[type="range"] {
+                width: 160px; accent-color: #00d4ff; cursor: pointer;
+            }
+            .slider-val { font-size: 14px; font-weight: 600; color: #00d4ff; min-width: 48px; }
+            
+            .action-btn {
+                padding: 10px 20px; border-radius: 10px;
+                background: rgba(0, 212, 255, 0.15); border: 1px solid #00d4ff;
+                color: #00d4ff; font-weight: 700; font-size: 14px; cursor: pointer;
+                transition: all 0.2s;
+            }
+            .action-btn:hover { background: #00d4ff; color: #000; }
         </style>
         </head>
         <body>
@@ -615,73 +851,163 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         <!-- LOADING SCREEN -->
         <div id="loading-screen">
             <div class="loading-title">MadhurVision</div>
-            <div class="loading-sub">Initializing VR Environment...</div>
+            <div class="loading-sub">MadhurVision OS 2.0 • Ultra HD VR</div>
             <div class="loading-bar-track"><div class="loading-bar-fill"></div></div>
         </div>
         
         <!-- DESKTOP -->
         <div id="desktop">
+            <!-- DOCK -->
             <div id="dock">
                 <div class="dock-item" onclick="switchApp('home')">
                     <div class="dock-icon active" id="dock-home">🏠</div>
                     <div class="dock-label">Home</div>
                 </div>
-                <div class="dock-item" onclick="switchApp('browser')">
+                <div class="dock-item" onclick="launchGoogle()">
                     <div class="dock-icon" id="dock-browser">🌐</div>
-                    <div class="dock-label">Browser</div>
+                    <div class="dock-label">Google</div>
+                </div>
+                <div class="dock-item" onclick="launchYouTube()">
+                    <div class="dock-icon" id="dock-youtube">📺</div>
+                    <div class="dock-label">YouTube</div>
                 </div>
                 <div class="dock-item" onclick="switchApp('settings')">
                     <div class="dock-icon" id="dock-settings">⚙️</div>
                     <div class="dock-label">Settings</div>
                 </div>
                 <div class="dock-spacer"></div>
+                <div class="dock-item" onclick="wkMsg('recalibrate')">
+                    <div class="dock-icon" title="Recalibrate Center">🎯</div>
+                    <div class="dock-label">Center</div>
+                </div>
             </div>
             
+            <!-- MAIN AREA -->
             <div id="main-area">
+                <!-- TOP BAR -->
                 <div id="top-bar">
-                    <div class="top-bar-title" id="app-title">Home</div>
-                    <div class="top-bar-spacer"></div>
-                    <div class="top-bar-clock" id="clock">00:00</div>
+                    <div class="top-title" id="app-title">Home</div>
+                    <div class="top-spacer"></div>
+                    <div class="top-badge">120 Hz Standalone</div>
+                    <div class="top-clock" id="clock">12:00</div>
                 </div>
                 
+                <!-- OMNIBAR (URL & SEARCH) -->
                 <div id="url-bar-container">
                     <button class="nav-btn" onclick="wkMsg('goBack')">◀</button>
                     <button class="nav-btn" onclick="wkMsg('goForward')">▶</button>
                     <button class="nav-btn" onclick="wkMsg('reload')">↻</button>
-                    <input type="text" id="url-input" placeholder="Search Google or type a URL..." value="https://www.google.com">
+                    <input type="text" id="url-input" placeholder="Search Google or enter URL (e.g. google.com, youtube.com)..." value="https://www.google.com">
+                    <button class="go-btn" onclick="submitURL()">Open ↵</button>
                 </div>
                 
+                <!-- CONTENT CONTAINER -->
                 <div id="active-content">
+                    <!-- HOME VIEW -->
                     <div class="content-view active" id="home-view">
-                        <div class="home-logo">MV</div>
-                        <div class="home-subtitle">Welcome to MadhurVision OS</div>
+                        <div class="home-hero">
+                            <div class="home-logo-text">MadhurVision</div>
+                            <div class="home-desc">Your Spatial VR Computing System</div>
+                        </div>
+                        
+                        <div class="app-grid">
+                            <div class="app-card" onclick="launchGoogle()">
+                                <div class="app-card-icon">🔍</div>
+                                <div class="app-card-title">Google Search</div>
+                                <div class="app-card-desc">Browse the web with desktop-class performance</div>
+                            </div>
+                            <div class="app-card" onclick="launchYouTube()">
+                                <div class="app-card-icon">▶️</div>
+                                <div class="app-card-title">YouTube</div>
+                                <div class="app-card-desc">Watch videos in giant cinema theater screen</div>
+                            </div>
+                            <div class="app-card" onclick="openPresetURL('https://www.wikipedia.org')">
+                                <div class="app-card-icon">📚</div>
+                                <div class="app-card-title">Wikipedia</div>
+                                <div class="app-card-desc">Explore spatial knowledge & articles</div>
+                            </div>
+                            <div class="app-card" onclick="openPresetURL('https://www.reddit.com')">
+                                <div class="app-card-icon">💬</div>
+                                <div class="app-card-title">Reddit</div>
+                                <div class="app-card-desc">Community discussions & news</div>
+                            </div>
+                            <div class="app-card" onclick="openPresetURL('https://fast.com')">
+                                <div class="app-card-icon">⚡</div>
+                                <div class="app-card-title">Speed Test</div>
+                                <div class="app-card-desc">Check your network streaming bandwidth</div>
+                            </div>
+                            <div class="app-card" onclick="switchApp('settings')">
+                                <div class="app-card-icon">⚙️</div>
+                                <div class="app-card-title">System Settings</div>
+                                <div class="app-card-desc">Adjust screen size, IPD, and tracking</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="content-view" id="browser-view">
-                        <div class="browser-msg">Type a URL above and press GO to browse</div>
-                    </div>
+                    
+                    <!-- SETTINGS VIEW -->
                     <div class="content-view" id="settings-view">
-                        <div class="settings-title">⚙️ System Settings</div>
-                        <div class="settings-group">
-                            <div class="settings-group-title">Display</div>
-                            <div class="settings-row"><span class="settings-row-label">☀️ Brightness</span><span class="settings-row-value">Auto</span></div>
-                            <div class="settings-row"><span class="settings-row-label">📐 Screen Size</span><span class="settings-row-value">12" Virtual</span></div>
-                            <div class="settings-row"><span class="settings-row-label">👁️ IPD Offset</span><span class="settings-row-value">65mm</span></div>
-                        </div>
-                        <div class="settings-group">
-                            <div class="settings-group-title">Input</div>
-                            <div class="settings-row"><span class="settings-row-label">🖐️ Hand Tracking</span><span class="settings-row-value">Enabled</span></div>
-                            <div class="settings-row"><span class="settings-row-label">🎯 Cursor Sensitivity</span><span class="settings-row-value">2.5x</span></div>
-                            <div class="settings-row"><span class="settings-row-label">🖱️ Mouse Input</span><span class="settings-row-value">Connected</span></div>
-                        </div>
-                        <div class="settings-group">
-                            <div class="settings-group-title">Audio</div>
-                            <div class="settings-row"><span class="settings-row-label">🔊 Volume</span><span class="settings-row-value">80%</span></div>
-                            <div class="settings-row"><span class="settings-row-label">🎧 Audio Output</span><span class="settings-row-value">Built-in Speaker</span></div>
-                        </div>
-                        <div class="settings-group">
-                            <div class="settings-group-title">System</div>
-                            <div class="settings-row"><span class="settings-row-label">📱 Device</span><span class="settings-row-value">iPhone + VR Box</span></div>
-                            <div class="settings-row"><span class="settings-row-label">ℹ️ Version</span><span class="settings-row-value">MadhurVision OS 1.0</span></div>
+                        <div class="settings-container">
+                            <div class="settings-group">
+                                <div class="settings-group-title">Display & Screen Sizing</div>
+                                <div class="settings-row">
+                                    <div class="row-info">
+                                        <h4>Virtual Screen Preset</h4>
+                                        <p>Locked virtual screen scale (projector mode)</p>
+                                    </div>
+                                    <div class="preset-btn-group">
+                                        <button class="preset-btn" onclick="setPresetScale(0.7, this)">10" Mini</button>
+                                        <button class="preset-btn active" onclick="setPresetScale(1.0, this)">12" Std</button>
+                                        <button class="preset-btn" onclick="setPresetScale(1.3, this)">15" Pro</button>
+                                        <button class="preset-btn" onclick="setPresetScale(2.0, this)">Cinema 50"</button>
+                                    </div>
+                                </div>
+                                <div class="settings-row">
+                                    <div class="row-info">
+                                        <h4>IPD Offset (Lens Distance)</h4>
+                                        <p>Align stereo cameras to your eye separation</p>
+                                    </div>
+                                    <div class="slider-ctrl">
+                                        <input type="range" id="ipd-slider" min="55" max="75" value="65" oninput="updateIPD(this.value)">
+                                        <span class="slider-val" id="ipd-val">65 mm</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="settings-group">
+                                <div class="settings-group-title">Orientation & Tracking</div>
+                                <div class="settings-row">
+                                    <div class="row-info">
+                                        <h4>Recalibrate Center View</h4>
+                                        <p>Reset yaw and center the monitor straight ahead</p>
+                                    </div>
+                                    <button class="action-btn" onclick="wkMsg('recalibrate')">🎯 Recalibrate Center</button>
+                                </div>
+                                <div class="settings-row">
+                                    <div class="row-info">
+                                        <h4>Mixed Reality Passthrough</h4>
+                                        <p>Blend rear camera video into VR background</p>
+                                    </div>
+                                    <button class="action-btn" id="passthrough-btn" onclick="togglePassthrough()">Disable MR</button>
+                                </div>
+                            </div>
+                            
+                            <div class="settings-group">
+                                <div class="settings-group-title">System Information</div>
+                                <div class="settings-row">
+                                    <div class="row-info">
+                                        <h4>MadhurVision OS Version</h4>
+                                        <p>Unified Spatial VR Environment</p>
+                                    </div>
+                                    <span style="color:rgba(255,255,255,0.7); font-weight:600;">v2.0 (Build 26.0)</span>
+                                </div>
+                                <div class="settings-row">
+                                    <div class="row-info">
+                                        <h4>Display Mode</h4>
+                                        <p>High-Fidelity Dual-Eye Stereo</p>
+                                    </div>
+                                    <span style="color:#00d4ff; font-weight:600;">1440x810 Internal Canvas</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -689,14 +1015,15 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         </div>
         
         <script>
-        // Boot sequence
+        // Boot Sequence
         setTimeout(function() {
-            document.getElementById('loading-screen').classList.add('hidden');
+            var loader = document.getElementById('loading-screen');
+            if (loader) loader.classList.add('hidden');
             setTimeout(function() {
-                document.getElementById('loading-screen').style.display = 'none';
+                if (loader) loader.style.display = 'none';
                 document.getElementById('desktop').classList.add('visible');
-            }, 600);
-        }, 2500);
+            }, 500);
+        }, 1200);
         
         // Clock
         function updateClock() {
@@ -704,43 +1031,78 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             document.getElementById('clock').textContent =
                 now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
         }
-        updateClock(); setInterval(updateClock, 30000);
+        updateClock(); setInterval(updateClock, 10000);
         
-        // Swift bridge helper
+        // Swift Bridge Helper
         function wkMsg(action, data) {
             var msg = {action: action};
             if (data) Object.assign(msg, data);
-            window.webkit.messageHandlers.vrOS.postMessage(msg);
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.vrOS) {
+                window.webkit.messageHandlers.vrOS.postMessage(msg);
+            }
         }
         
-        // App switching
+        // App Switching
         var currentApp = 'home';
         function switchApp(app) {
-            if (currentApp === app) return;
             currentApp = app;
-            
             document.querySelectorAll('.dock-icon').forEach(function(i) { i.classList.remove('active'); });
             var di = document.getElementById('dock-' + app);
             if (di) di.classList.add('active');
             
-            var titles = {home:'Home', browser:'Browser', settings:'Settings'};
+            var titles = {home: 'Home', settings: 'System Settings'};
             document.getElementById('app-title').textContent = titles[app] || app;
-            
-            var urlBar = document.getElementById('url-bar-container');
-            urlBar.classList.toggle('visible', app === 'browser');
             
             document.querySelectorAll('.content-view').forEach(function(v) { v.classList.remove('active'); });
             var target = document.getElementById(app + '-view');
             if (target) target.classList.add('active');
         }
         
-        // URL bar
+        // Navigation Shortcuts
+        function launchGoogle() {
+            wkMsg('navigate', {url: 'https://www.google.com'});
+        }
+        
+        function launchYouTube() {
+            wkMsg('navigate', {url: 'https://www.youtube.com'});
+        }
+        
+        function openPresetURL(url) {
+            wkMsg('navigate', {url: url});
+        }
+        
+        function submitURL() {
+            var url = document.getElementById('url-input').value;
+            if (url) wkMsg('navigate', {url: url});
+        }
+        
         document.getElementById('url-input').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                wkMsg('navigate', {url: this.value});
+                submitURL();
             }
         });
+        
+        // Settings Controls
+        function setPresetScale(scale, btn) {
+            document.querySelectorAll('.preset-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            wkMsg('setScale', {scale: scale});
+        }
+        
+        function updateIPD(val) {
+            document.getElementById('ipd-val').textContent = val + ' mm';
+            wkMsg('setIPD', {ipd: parseFloat(val)});
+        }
+        
+        var passthroughEnabled = true;
+        function togglePassthrough() {
+            passthroughEnabled = !passthroughEnabled;
+            var btn = document.getElementById('passthrough-btn');
+            btn.textContent = passthroughEnabled ? 'Disable MR' : 'Enable MR';
+            btn.style.borderColor = passthroughEnabled ? '#00d4ff' : 'rgba(255,255,255,0.3)';
+            wkMsg('togglePassthrough', {enabled: passthroughEnabled});
+        }
         </script>
         </body>
         </html>
