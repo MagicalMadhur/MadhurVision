@@ -65,10 +65,10 @@ class HandCursorNode: SCNNode {
         }
         let pos = smoothedFingerPos!
 
-        // --- Convert normalized finger position to a 3D ray from the camera ---
-        // Map 0–1 to -1…1 clip space
-        let ndcX = Float(pos.x * 2.0 - 1.0)
-        let ndcY = -Float(pos.y * 2.0 - 1.0) // INVERT Y-AXIS HERE
+        // Apply sensitivity multiplier so the user doesn't have to move their hand out of the camera's narrow FOV
+        let sensitivity: Float = 2.5
+        let ndcX = Float(pos.x * 2.0 - 1.0) * sensitivity
+        let ndcY = -Float(pos.y * 2.0 - 1.0) * sensitivity // INVERT Y-AXIS HERE
 
         // Build a ray in camera space (pointing into the scene, at distance 3m)
         let rayDirection = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.0)

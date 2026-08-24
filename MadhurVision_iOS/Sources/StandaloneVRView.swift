@@ -286,8 +286,10 @@ class VREngine: ObservableObject {
                 // Window grab & move: fist clench drags the browser in 3D
                 if isGrabbing, let browser = self.browserNode {
                     // 1. Convert 2D hand position to 3D point at Z = browser distance relative to camera
-                    let ndcX = Float(grabPosition.x * 2.0 - 1.0)
-                    let ndcY = Float(grabPosition.y * 2.0 - 1.0)
+                    // Apply sensitivity multiplier so small hand movements cover the whole space
+                    let sensitivity: Float = 2.5
+                    let ndcX = Float(grabPosition.x * 2.0 - 1.0) * sensitivity
+                    let ndcY = Float(grabPosition.y * 2.0 - 1.0) * sensitivity
                     
                     // Scale to world dimensions at z = 2.5
                     let worldX = ndcX * 2.5
