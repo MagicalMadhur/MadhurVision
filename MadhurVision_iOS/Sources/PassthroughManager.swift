@@ -75,7 +75,6 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
         // Feed raw frame to HandTrackingManager (runs its own async vision queue)
         HandTrackingManager.shared.processFrame(pixelBuffer)
     }
-}
 
     func updateOrientation(_ orientation: AVCaptureVideoOrientation) {
         if let connection = videoOutput.connection(with: .video) {
@@ -84,3 +83,4 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
             }
         }
     }
+}
