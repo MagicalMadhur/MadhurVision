@@ -56,17 +56,6 @@ class DualEyeContainerView: UIView {
         
         super.init(frame: .zero)
         self.backgroundColor = .black
-        
-        DispatchQueue.main.async {
-            let orientation = UIApplication.shared.windows.first?.windowScene?.interfaceOrientation ?? .landscapeRight
-            let avOrientation: AVCaptureVideoOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
-            
-            if let conn = self.cameraPreview.connection, conn.isVideoOrientationSupported {
-                conn.videoOrientation = avOrientation
-            }
-            PassthroughManager.shared.updateOrientation(avOrientation)
-        }
-        
         replicatorLayer.addSublayer(cameraPreview)
         self.layer.addSublayer(replicatorLayer)
         
@@ -78,6 +67,15 @@ class DualEyeContainerView: UIView {
     
     override func layoutSubviews() {
         super.layoutSubviews()
+        
+        let orientation = UIApplication.shared.windows.first?.windowScene?.interfaceOrientation ?? .landscapeRight
+        let avOrientation: AVCaptureVideoOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
+        
+        if let conn = self.cameraPreview.connection, conn.isVideoOrientationSupported {
+            conn.videoOrientation = avOrientation
+        }
+        PassthroughManager.shared.updateOrientation(avOrientation)
+        
         let halfWidth = bounds.width / 2.0
         
         cameraPreview.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)

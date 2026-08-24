@@ -16,6 +16,8 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
     private let videoOutput = AVCaptureVideoDataOutput()
     private let processingQueue = DispatchQueue(label: "PassthroughQueue", qos: .userInteractive)
 
+    private var isConfigured = false
+
     private override init() {
         super.init()
     }
@@ -23,6 +25,15 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
     func start(scene: SCNScene) {
         self.scene = scene
         guard !captureSession.isRunning else { return }
+        
+        if isConfigured {
+            processingQueue.async {
+                self.captureSession.startRunning()
+            }
+            return
+        }
+        
+        isConfigured = true
 
         captureSession.beginConfiguration()
         captureSession.sessionPreset = .hd1280x720
