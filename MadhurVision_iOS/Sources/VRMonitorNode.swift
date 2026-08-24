@@ -316,19 +316,19 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     // MARK: - Border Frame
     
     private func addBorderFrame(width: CGFloat, height: CGFloat) {
-        let borderPlane = SCNPlane(width: width + 0.04, height: height + 0.04)
-        borderPlane.cornerRadius = 0.05
+        let borderPlane = SCNPlane(width: width + 0.08, height: height + 0.08)
+        borderPlane.cornerRadius = 0.06
         
         let borderMaterial = SCNMaterial()
-        borderMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.06)
-        borderMaterial.emission.contents = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.5) // Sleek cyan glow
+        borderMaterial.diffuse.contents = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.15)
+        borderMaterial.emission.contents = UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 0.8) // Glowing cyan frame
         borderMaterial.lightingModel = .constant
         borderMaterial.isDoubleSided = true
         borderPlane.materials = [borderMaterial]
         
         let borderNode = SCNNode(geometry: borderPlane)
         borderNode.name = "monitor_border"
-        borderNode.position = SCNVector3(0, 0, -0.002)
+        borderNode.position = SCNVector3(0, 0, -0.003)
         addChildNode(borderNode)
     }
     
@@ -340,37 +340,72 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         return renderer.image { ctx in
             let rect = CGRect(origin: .zero, size: size)
             
-            // Gradient Background
+            // Deep gradient background
             let colors = [
-                UIColor(red: 0.04, green: 0.06, blue: 0.12, alpha: 1.0).cgColor,
-                UIColor(red: 0.08, green: 0.05, blue: 0.16, alpha: 1.0).cgColor
+                UIColor(red: 0.05, green: 0.08, blue: 0.18, alpha: 1.0).cgColor,
+                UIColor(red: 0.03, green: 0.04, blue: 0.10, alpha: 1.0).cgColor
             ]
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0.0, 1.0]) {
                 ctx.cgContext.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: size.width, y: size.height), options: [])
             }
             
-            // Sidebar Dock background
+            // Dock background on left
             let dockRect = CGRect(x: 0, y: 0, width: 80, height: size.height)
-            UIColor(white: 1.0, alpha: 0.06).setFill()
+            UIColor(red: 0.06, green: 0.08, blue: 0.14, alpha: 0.85).setFill()
             UIRectFill(dockRect)
             
-            // Logo & Title
-            let title = "MadhurVision OS"
+            // Dock border line
+            let dockLine = CGRect(x: 80, y: 0, width: 1, height: size.height)
+            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3).setFill()
+            UIRectFill(dockLine)
+            
+            // Top bar
+            let topBar = CGRect(x: 80, y: 0, width: size.width - 80, height: 48)
+            UIColor(white: 1.0, alpha: 0.04).setFill()
+            UIRectFill(topBar)
+            
+            // Top title
+            let topTitle = "MadhurVision OS 2.0"
+            let topAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 16, weight: .bold),
+                .foregroundColor: UIColor.white
+            ]
+            topTitle.draw(at: CGPoint(x: 104, y: 14), withAttributes: topAttrs)
+            
+            // Hero Title
+            let title = "MadhurVision"
             let titleAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 48, weight: .bold),
+                .font: UIFont.systemFont(ofSize: 56, weight: .black),
                 .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0)
             ]
             let titleSize = title.size(withAttributes: titleAttrs)
-            title.draw(at: CGPoint(x: (size.width - titleSize.width) / 2.0 + 40, y: size.height * 0.35), withAttributes: titleAttrs)
+            title.draw(at: CGPoint(x: (size.width - titleSize.width) / 2.0 + 40, y: size.height * 0.25), withAttributes: titleAttrs)
             
-            let sub = "Initializing High-Speed VR Environment..."
+            // Subtitle
+            let sub = "Spatial VR Computing • Google Browser • Settings"
             let subAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 22, weight: .medium),
+                .font: UIFont.systemFont(ofSize: 18, weight: .medium),
                 .foregroundColor: UIColor(white: 1.0, alpha: 0.6)
             ]
             let subSize = sub.size(withAttributes: subAttrs)
-            sub.draw(at: CGPoint(x: (size.width - subSize.width) / 2.0 + 40, y: size.height * 0.35 + 65), withAttributes: subAttrs)
+            sub.draw(at: CGPoint(x: (size.width - subSize.width) / 2.0 + 40, y: size.height * 0.25 + 70), withAttributes: subAttrs)
+            
+            // Search Box mockup
+            let searchRect = CGRect(x: (size.width - 600) / 2.0 + 40, y: size.height * 0.45, width: 600, height: 50)
+            let searchPath = UIBezierPath(roundedRect: searchRect, cornerRadius: 14)
+            UIColor(white: 1.0, alpha: 0.08).setFill()
+            searchPath.fill()
+            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.4).setStroke()
+            searchPath.lineWidth = 1.5
+            searchPath.stroke()
+            
+            let searchPlaceholder = "Search Google or type a URL..."
+            let searchAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 16, weight: .regular),
+                .foregroundColor: UIColor(white: 1.0, alpha: 0.5)
+            ]
+            searchPlaceholder.draw(at: CGPoint(x: searchRect.origin.x + 20, y: searchRect.origin.y + 15), withAttributes: searchAttrs)
         }
     }
     

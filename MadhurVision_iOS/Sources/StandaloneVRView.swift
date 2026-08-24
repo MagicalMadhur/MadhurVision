@@ -11,36 +11,11 @@ struct StandaloneVRView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            GeometryReader { geo in
-                HStack(spacing: 0) {
-                    // Left Eye
-                    SceneView(
-                        scene: vrEngine.scene,
-                        pointOfView: vrEngine.leftCameraNode,
-                        options: [.rendersContinuously]
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onTapGesture { location in
-                        let size = CGSize(width: geo.size.width / 2.0, height: geo.size.height)
-                        vrEngine.handleDirectScreenTap(location: location, isLeftEye: true, size: size)
-                    }
-                    
-                    // Right Eye
-                    SceneView(
-                        scene: vrEngine.scene,
-                        pointOfView: vrEngine.rightCameraNode,
-                        options: [.rendersContinuously]
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onTapGesture { location in
-                        let size = CGSize(width: geo.size.width / 2.0, height: geo.size.height)
-                        vrEngine.handleDirectScreenTap(location: location, isLeftEye: false, size: size)
-                    }
-                }
-            }
-            .ignoresSafeArea()
+            // Dual-Eye 120Hz SCNView Viewport
+            DualEyeVRContainer(vrEngine: vrEngine)
+                .ignoresSafeArea()
             
-            // Top HUD Controls (overlaid for easy access)
+            // Top HUD Controls
             VStack {
                 HStack(spacing: 14) {
                     // Exit button
@@ -49,50 +24,54 @@ struct StandaloneVRView: View {
                         appState.currentMode = .home
                     }) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundColor(.white.opacity(0.6))
+                            .font(.system(size: 28))
+                            .foregroundColor(.white.opacity(0.7))
                     }
                     
                     Spacer()
                     
-                    // Recalibrate Center Button
+                    // Recalibrate Center View Button
                     Button(action: { vrEngine.recalibrateView() }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 6) {
                             Image(systemName: "scope")
-                            Text("Center")
+                            Text("Center View")
                         }
-                        .font(.system(size: 12, weight: .bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.5))
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Color.black.opacity(0.6))
                         .foregroundColor(.cyan)
-                        .cornerRadius(8)
+                        .cornerRadius(10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.cyan.opacity(0.5), lineWidth: 1)
+                        )
                     }
                     
-                    // Window size controls (projector-style scale)
+                    // Window scale controls
                     Button(action: { vrEngine.scaleMonitor(by: -0.15) }) {
                         Image(systemName: "minus.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white.opacity(0.6))
+                            .font(.system(size: 26))
+                            .foregroundColor(.white.opacity(0.7))
                     }
                     
                     Text(String(format: "%.0f%%", vrEngine.monitorScale * 100))
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(.cyan)
                     
                     Button(action: { vrEngine.scaleMonitor(by: 0.15) }) {
                         Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white.opacity(0.6))
+                            .font(.system(size: 26))
+                            .foregroundColor(.white.opacity(0.7))
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
                 
                 Spacer()
             }
             
-            // Dual Crosshairs
+            // Dual Centered Crosshairs
             HStack(spacing: 0) {
                 Crosshair().frame(maxWidth: .infinity, maxHeight: .infinity)
                 Crosshair().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,15 +84,89 @@ struct StandaloneVRView: View {
     }
 }
 
+// MARK: - Dual-Eye SCNView Container (Native High-Perf 120Hz)
+
+struct DualEyeVRContainer: UIViewRepresentable {
+    let vrEngine: VREngine
+    
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .black
+        
+        let leftView = SCNView()
+        leftView.scene = vrEngine.scene
+        leftView.pointOfView = vrEngine.leftCameraNode
+        leftView.preferredFramesPerSecond = 120
+        leftView.isPlaying = true
+        leftView.loops = true
+        leftView.backgroundColor = .black
+        leftView.antialiasingMode = .multisampling2X
+        leftView.tag = 1001
+        
+        let rightView = SCNView()
+        rightView.scene = vrEngine.scene
+        rightView.pointOfView = vrEngine.rightCameraNode
+        rightView.preferredFramesPerSecond = 120
+        rightView.isPlaying = true
+        rightView.loops = true
+        rightView.backgroundColor = .black
+        rightView.antialiasingMode = .multisampling2X
+        rightView.tag = 1002
+        
+        container.addSubview(leftView)
+        container.addSubview(rightView)
+        
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        container.addGestureRecognizer(tap)
+        
+        return container
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {
+        let width = uiView.bounds.width
+        let height = uiView.bounds.height
+        guard width > 0, height > 0 else { return }
+        
+        let halfWidth = width / 2.0
+        if let leftView = uiView.viewWithTag(1001) as? SCNView {
+            leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: height)
+            leftView.pointOfView = vrEngine.leftCameraNode
+        }
+        if let rightView = uiView.viewWithTag(1002) as? SCNView {
+            rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: height)
+            rightView.pointOfView = vrEngine.rightCameraNode
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(vrEngine: vrEngine)
+    }
+    
+    class Coordinator: NSObject {
+        let vrEngine: VREngine
+        init(vrEngine: VREngine) { self.vrEngine = vrEngine }
+        
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard let view = gesture.view else { return }
+            let loc = gesture.location(in: view)
+            let totalW = view.bounds.width
+            let isLeft = loc.x < totalW / 2.0
+            let size = CGSize(width: totalW / 2.0, height: view.bounds.height)
+            let eyeLoc = CGPoint(x: isLeft ? loc.x : loc.x - totalW / 2.0, y: loc.y)
+            vrEngine.handleDirectScreenTap(location: eyeLoc, isLeftEye: isLeft, size: size)
+        }
+    }
+}
+
 struct Crosshair: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                .stroke(Color.white.opacity(0.4), lineWidth: 1.5)
                 .frame(width: 22, height: 22)
             Circle()
-                .fill(Color.cyan.opacity(0.8))
-                .frame(width: 4, height: 4)
+                .fill(Color.cyan)
+                .frame(width: 5, height: 5)
         }
     }
 }
@@ -138,23 +191,30 @@ class VREngine: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     
-    // Default Monitor distance in front of user (meters)
-    private let monitorDistance: Float = -2.2
+    // Monitor distance in front of user
+    private let monitorDistance: Float = -2.0
     
-    // Default IPD in meters (65mm)
+    // IPD in meters (default 65mm)
     private var ipd: Float = 0.065
     
-    // MARK: - Lifecycle
+    // Reference attitude for bulletproof zero-calibration
+    private var referenceAttitude: CMAttitude?
     
-    func start() {
+    init() {
         setupScene()
         setupCameras()
         setupHandCursor()
         setupMouseCursor()
+        spawnMonitor()
+    }
+    
+    // MARK: - Lifecycle
+    
+    func start() {
+        referenceAttitude = nil
         startHeadTracking()
         startPassthrough()
         startTracking()
-        spawnMonitor()
     }
     
     func stop() {
@@ -188,23 +248,17 @@ class VREngine: ObservableObject {
             PassthroughManager.shared.start(scene: scene)
         } else {
             PassthroughManager.shared.stop()
-            scene.background.contents = UIColor.black
+            scene.background.contents = UIColor(red: 0.02, green: 0.03, blue: 0.07, alpha: 1.0)
         }
     }
     
-    // MARK: - Recalibrate Center View
+    // MARK: - Recalibrate Center View (Sets reference attitude)
     
     func recalibrateView() {
-        guard let monitor = monitorNode else { return }
-        // Center the monitor directly in front along the current camera yaw
-        let currentYaw = cameraRig.eulerAngles.y
-        let dist = -monitorDistance
-        
-        let targetX = -sin(currentYaw) * dist
-        let targetZ = -cos(currentYaw) * dist
-        
-        monitor.position = SCNVector3(targetX, 0.05, targetZ)
-        monitor.eulerAngles = SCNVector3(0, currentYaw, 0)
+        referenceAttitude = nil
+        cameraRig.eulerAngles = SCNVector3(0, 0, 0)
+        monitorNode?.position = SCNVector3(0, 0.05, monitorDistance)
+        monitorNode?.eulerAngles = SCNVector3(0, 0, 0)
     }
     
     // MARK: - Direct Screen Taps (Fallback)
@@ -251,12 +305,13 @@ class VREngine: ObservableObject {
     // MARK: - Scene Setup
     
     private func setupScene() {
-        scene.background.contents = UIColor.black
+        scene.background.contents = UIColor(red: 0.02, green: 0.03, blue: 0.07, alpha: 1.0)
         
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.intensity = 600
+        ambient.light?.intensity = 1000
+        ambient.light?.color = UIColor.white
         scene.rootNode.addChildNode(ambient)
     }
     
@@ -266,6 +321,7 @@ class VREngine: ObservableObject {
         
         let leftCam = SCNCamera()
         leftCam.zNear = 0.01
+        leftCam.zFar = 100.0
         leftCam.fieldOfView = 90
         leftCameraNode.camera = leftCam
         leftCameraNode.position = SCNVector3(-ipd / 2.0, 0, 0)
@@ -273,6 +329,7 @@ class VREngine: ObservableObject {
         
         let rightCam = SCNCamera()
         rightCam.zNear = 0.01
+        rightCam.zFar = 100.0
         rightCam.fieldOfView = 90
         rightCameraNode.camera = rightCam
         rightCameraNode.position = SCNVector3(ipd / 2.0, 0, 0)
@@ -282,7 +339,7 @@ class VREngine: ObservableObject {
     // MARK: - Spawn Single Monitor
     
     private func spawnMonitor() {
-        let monitor = VRMonitorNode()
+        let monitor = VRMonitorNode(width: 2.2, height: 1.24)
         
         // Wire up settings callbacks from the Web OS
         monitor.onScaleChanged = { [weak self] scale in
@@ -298,7 +355,7 @@ class VREngine: ObservableObject {
             self?.setPassthrough(enabled: enabled)
         }
         
-        // Position directly in front at eye level
+        // Position directly in front at eye level (Z = -2.0m)
         monitor.position = SCNVector3(0, 0.05, monitorDistance)
         monitor.eulerAngles = SCNVector3(0, 0, 0)
         
@@ -331,32 +388,34 @@ class VREngine: ObservableObject {
         self.mouseCursor = cursor
     }
     
-    // MARK: - Landscape VR Head Tracking (120Hz)
-    
-    private var hasAlignedMonitor = false
+    // MARK: - Landscape VR Head Tracking (120Hz Delta Calibration)
     
     private func startHeadTracking() {
         guard motionManager.isDeviceMotionAvailable else { return }
         motionManager.deviceMotionUpdateInterval = 1.0 / 120.0
         
-        // Use reference frame with Z vertical
         motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: OperationQueue.main) { [weak self] motion, _ in
             guard let self, let motion else { return }
             
-            // In Landscape Left (phone rotated 90 deg counter-clockwise):
-            // - Tilting up/down is rotation around the phone's long axis (-roll)
-            // - Panning left/right is rotation around gravity vertical (-yaw)
-            // - Level horizon is maintained with 0 roll
-            let pitch = Float(-motion.attitude.roll)
-            let yaw   = Float(-motion.attitude.yaw)
+            // 1. Capture reference attitude on first frame or upon recalibration
+            if self.referenceAttitude == nil {
+                self.referenceAttitude = motion.attitude.copy() as? CMAttitude
+            }
+            
+            guard let ref = self.referenceAttitude,
+                  let current = motion.attitude.copy() as? CMAttitude else { return }
+            
+            // 2. Compute delta attitude relative to reference
+            // This guarantees that at t=0 or upon Recalibrate, delta rotation is strictly (0, 0, 0)!
+            current.multiply(byInverseOf: ref)
+            
+            // 3. Map delta orientation for Landscape Left:
+            // Tilting head up/down = -current.roll
+            // Turning head left/right = -current.yaw
+            let pitch = Float(-current.roll)
+            let yaw   = Float(-current.yaw)
             
             self.cameraRig.eulerAngles = SCNVector3(pitch, yaw, 0)
-            
-            // On startup, align monitor directly in front of the user's initial heading
-            if !self.hasAlignedMonitor {
-                self.hasAlignedMonitor = true
-                self.recalibrateView()
-            }
         }
     }
     
