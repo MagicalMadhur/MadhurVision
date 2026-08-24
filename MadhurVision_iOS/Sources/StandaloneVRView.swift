@@ -275,10 +275,10 @@ class VREngine: ObservableObject {
             self?.loadingNode = nil
         }
         
-        // Spawn Dock on the left
+        // Spawn Dock on the left (comfortably within FOV)
         let dock = VRDockNode()
-        dock.position = SCNVector3(-1.8, 0.1, browserDistance + 0.2) // closer to user, left side
-        dock.eulerAngles = SCNVector3(0, Float.pi / 10, 0) // turned slightly towards user
+        dock.position = SCNVector3(-1.1, 0.1, browserDistance + 0.2) 
+        dock.eulerAngles = SCNVector3(0, Float.pi / 8, 0) // turned slightly towards user
         dock.opacity = 0
         scene.rootNode.addChildNode(dock)
         self.dockNode = dock

@@ -1,4 +1,5 @@
 import SceneKit
+import SpriteKit
 import UIKit
 
 class VRSettingsNode: SCNNode {
@@ -9,19 +10,20 @@ class VRSettingsNode: SCNNode {
         let plane = SCNPlane(width: width, height: height)
         plane.cornerRadius = 0.05
         let mat = SCNMaterial()
-        mat.diffuse.contents = UIColor(red: 0.1, green: 0.1, blue: 0.15, alpha: 0.95)
-        mat.isDoubleSided = true
-        plane.materials = [mat]
-        self.geometry = plane
+        
+        // SpriteKit Scene for high quality 2D rendering
+        let skScene = SKScene(size: CGSize(width: 1200, height: 700))
+        skScene.backgroundColor = UIColor(white: 0.1, alpha: 0.95)
         
         // Title
-        let titleText = SCNText(string: "System Settings", extrusionDepth: 0.005)
-        titleText.font = UIFont.systemFont(ofSize: 0.15, weight: .bold)
-        titleText.firstMaterial?.diffuse.contents = UIColor.white
-        let titleNode = SCNNode(geometry: titleText)
-        let (tMin, tMax) = titleNode.boundingBox
-        titleNode.position = SCNVector3(-(tMax.x - tMin.x)/2, 0.45, 0.01)
-        self.addChildNode(titleNode)
+        let titleLabel = SKLabelNode(text: "System Settings")
+        titleLabel.fontName = "HelveticaNeue-Bold"
+        titleLabel.fontSize = 70
+        titleLabel.fontColor = .white
+        titleLabel.position = CGPoint(x: 600, y: 550)
+        titleLabel.verticalAlignmentMode = .center
+        titleLabel.horizontalAlignmentMode = .center
+        skScene.addChild(titleLabel)
         
         // Mock Settings Lines
         let settings = [
@@ -33,14 +35,21 @@ class VRSettingsNode: SCNNode {
         ]
         
         for (i, setting) in settings.enumerated() {
-            let text = SCNText(string: setting, extrusionDepth: 0.005)
-            text.font = UIFont.systemFont(ofSize: 0.08, weight: .medium)
-            text.firstMaterial?.diffuse.contents = UIColor.lightGray
-            let node = SCNNode(geometry: text)
-            let (min, max) = node.boundingBox
-            node.position = SCNVector3(-(max.x - min.x)/2, 0.15 - Float(i) * 0.18, 0.01)
-            self.addChildNode(node)
+            let label = SKLabelNode(text: setting)
+            label.fontName = "HelveticaNeue-Medium"
+            label.fontSize = 40
+            label.fontColor = .lightGray
+            // Start below title, spacing 60 points apart
+            label.position = CGPoint(x: 600, y: 400 - (CGFloat(i) * 60))
+            label.verticalAlignmentMode = .center
+            label.horizontalAlignmentMode = .center
+            skScene.addChild(label)
         }
+        
+        mat.diffuse.contents = skScene
+        mat.isDoubleSided = true
+        plane.materials = [mat]
+        self.geometry = plane
     }
     
     required init?(coder: NSCoder) {

@@ -1,11 +1,11 @@
 import SceneKit
+import SpriteKit
 import UIKit
 
 class VRDockNode: SCNNode {
     
-    // We store references so we can identify clicks
-    let browserIconNode = SCNNode()
-    let settingsIconNode = SCNNode()
+    let browserHitNode = SCNNode()
+    let settingsHitNode = SCNNode()
     
     init(height: CGFloat = 1.6) {
         super.init()
@@ -13,47 +13,70 @@ class VRDockNode: SCNNode {
         let plane = SCNPlane(width: 0.4, height: height)
         plane.cornerRadius = 0.2
         let mat = SCNMaterial()
-        mat.diffuse.contents = UIColor.white.withAlphaComponent(0.15) // Glass look
+        
+        // SpriteKit Scene for high quality 2D rendering
+        let skScene = SKScene(size: CGSize(width: 200, height: 800))
+        skScene.backgroundColor = UIColor(white: 0.1, alpha: 0.5) // Glass look
+        
+        // Browser Icon (Label with Emoji or Text)
+        let bIcon = SKLabelNode(text: "🌐")
+        bIcon.fontName = "AppleColorEmoji"
+        bIcon.fontSize = 80
+        bIcon.position = CGPoint(x: 100, y: 550)
+        bIcon.verticalAlignmentMode = .center
+        bIcon.horizontalAlignmentMode = .center
+        skScene.addChild(bIcon)
+        
+        let bText = SKLabelNode(text: "Browser")
+        bText.fontName = "HelveticaNeue-Medium"
+        bText.fontSize = 24
+        bText.fontColor = .white
+        bText.position = CGPoint(x: 100, y: 480)
+        bText.verticalAlignmentMode = .center
+        bText.horizontalAlignmentMode = .center
+        skScene.addChild(bText)
+        
+        // Settings Icon
+        let sIcon = SKLabelNode(text: "⚙️")
+        sIcon.fontName = "AppleColorEmoji"
+        sIcon.fontSize = 80
+        sIcon.position = CGPoint(x: 100, y: 250)
+        sIcon.verticalAlignmentMode = .center
+        sIcon.horizontalAlignmentMode = .center
+        skScene.addChild(sIcon)
+        
+        let sText = SKLabelNode(text: "Settings")
+        sText.fontName = "HelveticaNeue-Medium"
+        sText.fontSize = 24
+        sText.fontColor = .white
+        sText.position = CGPoint(x: 100, y: 180)
+        sText.verticalAlignmentMode = .center
+        sText.horizontalAlignmentMode = .center
+        skScene.addChild(sText)
+        
+        mat.diffuse.contents = skScene
         mat.isDoubleSided = true
         plane.materials = [mat]
         self.geometry = plane
         
-        // Browser Icon (Globe Emoji)
-        let browserText = SCNText(string: "🌐", extrusionDepth: 0.01)
-        browserText.font = UIFont.systemFont(ofSize: 0.15)
-        browserText.flatness = 0.01
-        browserIconNode.geometry = browserText
-        browserIconNode.name = "dock_browser"
-        let (bMin, bMax) = browserIconNode.boundingBox
-        browserIconNode.position = SCNVector3(-(bMax.x - bMin.x)/2, 0.2, 0.02)
+        // Transparent 3D touch targets (so VREngine can detect clicks)
         
-        // Transparent touch target for browser (easier to hit than complex text geometry)
-        let bHitPlane = SCNPlane(width: 0.25, height: 0.25)
+        // Browser Hit Target (Top half)
+        let bHitPlane = SCNPlane(width: 0.4, height: 0.4)
         bHitPlane.materials.first?.diffuse.contents = UIColor.clear
-        let bHitNode = SCNNode(geometry: bHitPlane)
-        bHitNode.name = "dock_browser"
-        bHitNode.position = SCNVector3((bMax.x - bMin.x)/2, (bMax.y - bMin.y)/2, 0.01)
-        browserIconNode.addChildNode(bHitNode)
+        browserHitNode.geometry = bHitPlane
+        browserHitNode.name = "dock_browser"
+        // In 3D space, height is 1.6. Y=0 is center. Top half is Y > 0.
+        browserHitNode.position = SCNVector3(0, 0.3, 0.01)
+        self.addChildNode(browserHitNode)
         
-        self.addChildNode(browserIconNode)
-        
-        // Settings Icon (Gear Emoji)
-        let settingsText = SCNText(string: "⚙️", extrusionDepth: 0.01)
-        settingsText.font = UIFont.systemFont(ofSize: 0.15)
-        settingsText.flatness = 0.01
-        settingsIconNode.geometry = settingsText
-        settingsIconNode.name = "dock_settings"
-        let (sMin, sMax) = settingsIconNode.boundingBox
-        settingsIconNode.position = SCNVector3(-(sMax.x - sMin.x)/2, -0.2, 0.02)
-        
-        let sHitPlane = SCNPlane(width: 0.25, height: 0.25)
+        // Settings Hit Target (Bottom half)
+        let sHitPlane = SCNPlane(width: 0.4, height: 0.4)
         sHitPlane.materials.first?.diffuse.contents = UIColor.clear
-        let sHitNode = SCNNode(geometry: sHitPlane)
-        sHitNode.name = "dock_settings"
-        sHitNode.position = SCNVector3((sMax.x - sMin.x)/2, (sMax.y - sMin.y)/2, 0.01)
-        settingsIconNode.addChildNode(sHitNode)
-        
-        self.addChildNode(settingsIconNode)
+        settingsHitNode.geometry = sHitPlane
+        settingsHitNode.name = "dock_settings"
+        settingsHitNode.position = SCNVector3(0, -0.3, 0.01)
+        self.addChildNode(settingsHitNode)
     }
     
     required init?(coder: NSCoder) {

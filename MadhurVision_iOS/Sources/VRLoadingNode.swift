@@ -1,4 +1,5 @@
 import SceneKit
+import SpriteKit
 import UIKit
 
 class VRLoadingNode: SCNNode {
@@ -8,35 +9,38 @@ class VRLoadingNode: SCNNode {
         
         let plane = SCNPlane(width: width, height: height)
         plane.cornerRadius = 0.1
+        
         let mat = SCNMaterial()
-        mat.diffuse.contents = UIColor.black.withAlphaComponent(0.6)
+        
+        // SpriteKit Scene for high quality 2D rendering
+        let skScene = SKScene(size: CGSize(width: 1400, height: 800))
+        skScene.backgroundColor = UIColor(white: 0.05, alpha: 0.5) // 50% transparent dark gray
+        
+        // Title
+        let titleLabel = SKLabelNode(text: "MadhurVision OS")
+        titleLabel.fontName = "HelveticaNeue-Bold"
+        titleLabel.fontSize = 110
+        titleLabel.fontColor = .white
+        titleLabel.position = CGPoint(x: 700, y: 450)
+        titleLabel.verticalAlignmentMode = .center
+        titleLabel.horizontalAlignmentMode = .center
+        skScene.addChild(titleLabel)
+        
+        // Subtitle / Loading text
+        let loadLabel = SKLabelNode(text: "Loading system modules...")
+        loadLabel.fontName = "HelveticaNeue-Medium"
+        loadLabel.fontSize = 50
+        loadLabel.fontColor = .cyan
+        loadLabel.position = CGPoint(x: 700, y: 320)
+        loadLabel.verticalAlignmentMode = .center
+        loadLabel.horizontalAlignmentMode = .center
+        skScene.addChild(loadLabel)
+        
+        // Apply SKScene to diffuse
+        mat.diffuse.contents = skScene
         mat.isDoubleSided = true
         plane.materials = [mat]
         self.geometry = plane
-        
-        // Title Text
-        let titleText = SCNText(string: "MadhurVision OS", extrusionDepth: 0.01)
-        titleText.font = UIFont.systemFont(ofSize: 0.2, weight: .bold)
-        titleText.firstMaterial?.diffuse.contents = UIColor.white
-        titleText.flatness = 0.01
-        
-        let titleNode = SCNNode(geometry: titleText)
-        let (min, max) = titleNode.boundingBox
-        let titleWidth = max.x - min.x
-        titleNode.position = SCNVector3(-titleWidth/2, 0.1, 0.01)
-        self.addChildNode(titleNode)
-        
-        // Loading Text
-        let loadText = SCNText(string: "Loading system modules...", extrusionDepth: 0.005)
-        loadText.font = UIFont.systemFont(ofSize: 0.08, weight: .regular)
-        loadText.firstMaterial?.diffuse.contents = UIColor.cyan
-        loadText.flatness = 0.01
-        
-        let loadNode = SCNNode(geometry: loadText)
-        let (lMin, lMax) = loadNode.boundingBox
-        let loadWidth = lMax.x - lMin.x
-        loadNode.position = SCNVector3(-loadWidth/2, -0.15, 0.01)
-        self.addChildNode(loadNode)
     }
     
     required init?(coder: NSCoder) {
