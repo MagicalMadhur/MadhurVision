@@ -4,7 +4,8 @@ import UIKit
 /// A Windows-like mouse cursor node in 3D space
 class MouseCursorNode: SCNNode {
     
-    weak var browserNode: VRBrowserNode?
+    var onClick: ((SCNHitTestResult) -> Void)?
+    private var previousIsClicking = false
     
     private let pointerNode = SCNNode()
     
@@ -91,27 +92,34 @@ class MouseCursorNode: SCNNode {
             worldOrigin.z + worldDirection.z
         )
         
+        // --- Generic Raycast ---
         let hits = scene.rootNode.hitTestWithSegment(
             from: worldOrigin,
             to: rayEnd,
             options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
         )
         
-        if let hit = hits.first(where: { $0.node === browserNode }) {
+        // Find the first hit that isn't the cursor itself
+        if let hit = hits.first(where: { $0.node !== self && $0.node !== pointerNode }) {
             pointerNode.isHidden = false
             pointerNode.worldPosition = hit.worldCoordinates
             
-            // Keep the pointer facing the camera
-            pointerNode.eulerAngles = cameraNode.eulerAngles
+            // Adjust depth slightly to float above the surface
+            let surfaceNormal = hit.localNormal
+            let normalInWorld = hit.node.convertVector(surfaceNormal, to: nil)
+            pointerNode.worldPosition = SCNVector3(
+                hit.worldCoordinates.x + normalInWorld.x * 0.005,
+                hit.worldCoordinates.y + normalInWorld.y * 0.005,
+                hit.worldCoordinates.z + normalInWorld.z * 0.005
+            )
             
-            // Interaction
-            if isClicking {
-                let uv = CGPoint(x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
-                                 y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y))
-                browserNode?.simulateClick(at: uv)
+            if isClicking && !previousIsClicking {
+                onClick?(hit)
             }
         } else {
             pointerNode.isHidden = true
         }
+        
+        previousIsClicking = isClicking
     }
 }

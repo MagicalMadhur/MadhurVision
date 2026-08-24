@@ -110,11 +110,22 @@ class VREngine: ObservableObject {
     let leftCameraNode  = SCNNode()
     let rightCameraNode = SCNNode()
     
+    enum OSState {
+        case loading
+        case desktop
+    }
+    
     @Published var browserScale: CGFloat = 1.0  // 1.0 = default, user can resize
+    @Published var osState: OSState = .loading
     
     private let cameraRig   = SCNNode()
     private let motionManager = CMMotionManager()
-    private var browserNode: VRBrowserNode?
+    
+    // OS Nodes
+    private var loadingNode: VRLoadingNode?
+    private var dockNode: VRDockNode?
+    private var activeWindowNode: SCNNode?
+    
     private var handCursor: HandCursorNode?
     private var mouseCursor: MouseCursorNode?
     
@@ -133,17 +144,19 @@ class VREngine: ObservableObject {
     func start() {
         setupScene()
         setupCameras()
-        setupBrowser()
         setupHandCursor()
         setupMouseCursor()
         startHeadTracking()
         startPassthrough()
         startTracking()
+        bootOS()
     }
     
     func stop() {
         motionManager.stopDeviceMotionUpdates()
-        browserNode?.cleanup()
+        if let browser = activeWindowNode as? VRBrowserNode {
+            browser.cleanup()
+        }
         PassthroughManager.shared.stop()
         HandTrackingManager.shared.stop()
         cancellables.removeAll()
@@ -154,7 +167,7 @@ class VREngine: ObservableObject {
     func resizeBrowser(by delta: CGFloat) {
         browserScale = max(0.3, min(2.0, browserScale + delta))
         let s = Float(browserScale)
-        browserNode?.scale = SCNVector3(s, s, s)
+        activeWindowNode?.scale = SCNVector3(s, s, s)
     }
     
     // MARK: - Direct Screen Taps (Fallback for AssistiveTouch)
@@ -183,10 +196,28 @@ class VREngine: ObservableObject {
             options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
         )
         
-        if let hit = hits.first(where: { $0.node === browserNode }) {
+        if let hit = hits.first {
+            handleHit(hit)
+        }
+    }
+    
+    private func handleHit(_ hit: SCNHitTestResult) {
+        if let name = hit.node.name {
+            if name == "dock_browser" {
+                launchApp(type: .browser)
+                return
+            } else if name == "dock_settings" {
+                launchApp(type: .settings)
+                return
+            }
+        }
+        
+        // If it's a browser window, send click
+        let node = hit.node
+        if let browser = activeWindowNode as? VRBrowserNode, node === browser || node.parent === browser {
             let uv = CGPoint(x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
                              y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y))
-            browserNode?.simulateClick(at: uv)
+            browser.simulateClick(at: uv)
         }
     }
     
@@ -221,36 +252,93 @@ class VREngine: ObservableObject {
         cameraRig.addChildNode(rightCameraNode)
     }
     
-    private func setupBrowser() {
-        let browser = VRBrowserNode(
-            url: URL(string: "https://www.youtube.com")!,
-            width: baseBrowserWidth,
-            height: baseBrowserHeight
-        )
-        // Start floating 2.5m ahead, slightly above eye level
-        browser.position = SCNVector3(0, 0.1, browserDistance)
+    private func bootOS() {
+        osState = .loading
+        let loader = VRLoadingNode()
+        // Center it slightly higher than eye level
+        loader.position = SCNVector3(0, 0.1, browserDistance)
+        scene.rootNode.addChildNode(loader)
+        self.loadingNode = loader
         
-        // Subtle idle bob
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.transitionToDesktop()
+        }
+    }
+    
+    private func transitionToDesktop() {
+        osState = .desktop
+        
+        // Fade out loading screen
+        let fadeOut = SCNAction.fadeOut(duration: 0.5)
+        loadingNode?.runAction(fadeOut) { [weak self] in
+            self?.loadingNode?.removeFromParentNode()
+            self?.loadingNode = nil
+        }
+        
+        // Spawn Dock on the left
+        let dock = VRDockNode()
+        dock.position = SCNVector3(-1.8, 0.1, browserDistance + 0.2) // closer to user, left side
+        dock.eulerAngles = SCNVector3(0, Float.pi / 10, 0) // turned slightly towards user
+        dock.opacity = 0
+        scene.rootNode.addChildNode(dock)
+        self.dockNode = dock
+        
+        dock.runAction(SCNAction.fadeIn(duration: 0.5))
+    }
+    
+    enum AppType {
+        case browser
+        case settings
+    }
+    
+    private func launchApp(type: AppType) {
+        // Cleanup old app
+        if let browser = activeWindowNode as? VRBrowserNode {
+            browser.cleanup()
+        }
+        activeWindowNode?.removeFromParentNode()
+        
+        let newNode: SCNNode
+        switch type {
+        case .browser:
+            newNode = VRBrowserNode(
+                url: URL(string: "https://www.google.com")!,
+                width: baseBrowserWidth,
+                height: baseBrowserHeight
+            )
+        case .settings:
+            newNode = VRSettingsNode()
+        }
+        
+        newNode.position = SCNVector3(0.3, 0.1, browserDistance) // slightly shifted right to make room for dock
         let bob = SCNAction.sequence([
             SCNAction.moveBy(x: 0, y: 0.03, z: 0, duration: 2.0),
             SCNAction.moveBy(x: 0, y: -0.03, z: 0, duration: 2.0)
         ])
-        browser.runAction(SCNAction.repeatForever(bob))
+        newNode.runAction(SCNAction.repeatForever(bob))
         
-        scene.rootNode.addChildNode(browser)
-        self.browserNode = browser
+        // Appear animation
+        newNode.scale = SCNVector3(0.01, 0.01, 0.01)
+        newNode.runAction(SCNAction.scale(to: CGFloat(browserScale), duration: 0.4))
+        
+        scene.rootNode.addChildNode(newNode)
+        self.activeWindowNode = newNode
     }
     
     private func setupHandCursor() {
         let cursor = HandCursorNode()
-        cursor.browserNode = browserNode
+        cursor.onClick = { [weak self] hit in
+            self?.handleHit(hit)
+        }
         scene.rootNode.addChildNode(cursor)
         self.handCursor = cursor
     }
     
     private func setupMouseCursor() {
         let cursor = MouseCursorNode()
-        cursor.browserNode = browserNode
+        cursor.onClick = { [weak self] hit in
+            self?.handleHit(hit)
+        }
         scene.rootNode.addChildNode(cursor)
         self.mouseCursor = cursor
     }
@@ -270,7 +358,7 @@ class VREngine: ObservableObject {
                 z: Float(motion.attitude.roll)
             )
             
-            // Auto-center the browser on the very first valid tracking frame
+            // Auto-center the active window on the very first valid tracking frame
             if !self.hasCenteredBrowser {
                 self.hasCenteredBrowser = true
                 
@@ -278,8 +366,8 @@ class VREngine: ObservableObject {
                 let localFront = SCNVector3(0, 0, self.browserDistance)
                 let worldFront = self.cameraRig.convertPosition(localFront, to: nil)
                 
-                self.browserNode?.position = worldFront
-                self.browserNode?.eulerAngles = self.cameraRig.eulerAngles
+                self.loadingNode?.position = worldFront
+                self.loadingNode?.eulerAngles = self.cameraRig.eulerAngles
             }
         }
     }
@@ -327,8 +415,8 @@ class VREngine: ObservableObject {
                 guard let self else { return }
                 let ((fingerPos, isPinching, scrollDelta), isGrabbing, grabPosition) = combined
                 
-                // Window grab & move: fist clench drags the browser in 3D
-                if isGrabbing, let browser = self.browserNode {
+                // Window grab & move: fist clench drags the active window in 3D
+                if isGrabbing, let activeNode = self.activeWindowNode {
                     // 1. Convert 2D hand position to 3D point at Z = browser distance relative to camera
                     // Apply sensitivity multiplier so small hand movements cover the whole space
                     let sensitivity: Float = 2.5
@@ -347,9 +435,9 @@ class VREngine: ObservableObject {
                         self.isCurrentlyGrabbing = true
                         // Record offset from hand ray to browser center
                         self.grabOffset = SCNVector3(
-                            browser.position.x - worldPoint.x,
-                            browser.position.y - worldPoint.y,
-                            browser.position.z - worldPoint.z
+                            activeNode.position.x - worldPoint.x,
+                            activeNode.position.y - worldPoint.y,
+                            activeNode.position.z - worldPoint.z
                         )
                     }
                     
@@ -360,12 +448,12 @@ class VREngine: ObservableObject {
                     )
                     
                     // Smoothly interpolate to target position
-                    browser.position.x += (targetPos.x - browser.position.x) * 0.15
-                    browser.position.y += (targetPos.y - browser.position.y) * 0.15
-                    browser.position.z += (targetPos.z - browser.position.z) * 0.15
+                    activeNode.position.x += (targetPos.x - activeNode.position.x) * 0.15
+                    activeNode.position.y += (targetPos.y - activeNode.position.y) * 0.15
+                    activeNode.position.z += (targetPos.z - activeNode.position.z) * 0.15
                     
-                    // Keep the browser facing the user!
-                    browser.eulerAngles = self.cameraRig.eulerAngles
+                    // Keep the window facing the user!
+                    activeNode.eulerAngles = self.cameraRig.eulerAngles
                     
                     return  // skip cursor update while grabbing
                 } else {

@@ -5,8 +5,8 @@ import UIKit
 /// and raycasts against the browser window to drive click/scroll interactions.
 class HandCursorNode: SCNNode {
 
-    // Reference to the browser node for hit-testing
-    weak var browserNode: VRBrowserNode?
+    // The closure to call when a pinch-click occurs
+    var onClick: ((SCNHitTestResult) -> Void)?
 
     // The glowing dot
     private let dotNode = SCNNode()
@@ -87,31 +87,31 @@ class HandCursorNode: SCNNode {
             worldOrigin.z + worldDirection.z
         )
 
-        // --- Raycast against the browser node ---
+        // --- Generic Raycast ---
         let hits = scene.rootNode.hitTestWithSegment(
             from: worldOrigin,
             to: rayEnd,
             options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
         )
 
-        if let hit = hits.first(where: { $0.node === browserNode }) {
-            // Cursor is hitting the browser window
+        // Find the first hit that isn't the cursor itself
+        if let hit = hits.first(where: { $0.node !== self && $0.node !== dotNode }) {
+            // Cursor is hitting an object in the world
             dotNode.isHidden = false
             dotNode.worldPosition = hit.worldCoordinates
-
-            // UV coordinates on the browser texture (0–1)
-            let uv = CGPoint(x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
-                             y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y))
-
-            // Only fire click ONCE per pinch (rising edge)
+            
+            // Only fire click once per pinch (rising edge trigger)
             if isPinching && !previousIsPinching {
-                browserNode?.simulateClick(at: uv)
+                onClick?(hit)
             }
-
-            if abs(scrollDelta) > 0.005 {
-                browserNode?.simulateScroll(by: scrollDelta)
+            
+            // Handle scrolling if it's a browser node
+            if scrollDelta != 0 {
+                let node = hit.node
+                if let browser = node as? VRBrowserNode ?? node.parent as? VRBrowserNode {
+                    browser.simulateScroll(by: scrollDelta)
+                }
             }
-
         } else {
             // Cursor not on browser — hide or float in air
             dotNode.isHidden = true
