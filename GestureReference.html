@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MadhurVision — Gesture Reference</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy: #0d1b2a; --card: #112236; --cyan: #00d4ff;
+      --white: #ffffff; --muted: #8899aa; --border: rgba(0,212,255,0.18);
+    }
+    body { font-family: 'Inter', sans-serif; background: var(--navy); color: var(--white); }
+
+    /* Cover */
+    .cover {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 60px 40px;
+      background: radial-gradient(ellipse at 50% 30%, #0a3055 0%, #0d1b2a 70%);
+      text-align: center; page-break-after: always;
+    }
+    .logo-ring {
+      width: 100px; height: 100px; border-radius: 50%;
+      border: 2px solid var(--cyan); display: flex; align-items: center; justify-content: center;
+      font-size: 48px; margin-bottom: 32px; box-shadow: 0 0 40px rgba(0,212,255,0.3);
+    }
+    .cover h1 {
+      font-size: 52px; font-weight: 800; letter-spacing: -1px;
+      background: linear-gradient(135deg, #fff 40%, #00d4ff 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 12px;
+    }
+    .cover .subtitle { font-size: 18px; color: var(--muted); margin-bottom: 48px; }
+    .divider { width: 60px; height: 2px; background: linear-gradient(90deg, transparent, var(--cyan), transparent); margin: 40px auto; }
+    .cover-meta { display: flex; gap: 40px; font-size: 13px; color: var(--muted); }
+    .cover-meta span strong { color: var(--white); display: block; font-size: 15px; }
+
+    /* Section */
+    .section-header { padding: 60px 60px 20px; }
+    .section-header .tag {
+      display: inline-block; background: rgba(0,212,255,0.12); border: 1px solid var(--border);
+      color: var(--cyan); font-size: 11px; font-weight: 600; letter-spacing: 2px;
+      padding: 5px 14px; border-radius: 100px; margin-bottom: 16px; text-transform: uppercase;
+    }
+    .section-header h2 { font-size: 36px; font-weight: 700; }
+    .section-header p { color: var(--muted); margin-top: 8px; font-size: 15px; }
+
+    /* Grid */
+    .gesture-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 28px; padding: 40px 60px;
+    }
+    .gesture-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 20px; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    }
+    .gesture-card img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+    .gesture-card .card-body { padding: 24px 28px 28px; }
+    .badge {
+      display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+      text-transform: uppercase; padding: 4px 10px; border-radius: 100px; margin-bottom: 10px;
+    }
+    .badge-active { background: rgba(0,212,255,0.15); color: var(--cyan); border: 1px solid rgba(0,212,255,0.3); }
+    .gesture-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .gesture-card .action { font-size: 13px; color: var(--cyan); font-weight: 600; margin-bottom: 12px; }
+    .gesture-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+    .tech-note {
+      margin-top: 14px; padding: 10px 14px; background: rgba(255,255,255,0.04);
+      border-left: 2px solid var(--cyan); border-radius: 6px; font-size: 12px; color: var(--muted);
+    }
+    .tech-note strong { color: var(--white); }
+
+    /* Table */
+    .future-table-wrap { padding: 0 60px 80px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+      color: var(--muted); padding: 12px 16px; border-bottom: 1px solid var(--border); text-align: left;
+    }
+    tbody tr { border-bottom: 1px solid rgba(255,255,255,0.05); }
+    tbody td { padding: 16px; font-size: 14px; }
+    tbody td:first-child { font-weight: 600; }
+    tbody td:nth-child(2) { color: var(--cyan); }
+    tbody td:last-child { color: #ffd000; }
+
+    footer {
+      text-align: center; padding: 40px; border-top: 1px solid var(--border);
+      color: var(--muted); font-size: 13px;
+    }
+    footer strong { color: var(--white); }
+    @media print { body { background: #0d1b2a !important; -webkit-print-color-adjust: exact; } .gesture-card { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="logo-ring">🥽</div>
+  <h1>MadhurVision</h1>
+  <div class="subtitle">Gesture Reference Document — v1.0</div>
+  <div class="divider"></div>
+  <div class="cover-meta">
+    <span><strong>Platform</strong>iOS Standalone VR</span>
+    <span><strong>Device</strong>VR BOX Headset</span>
+    <span><strong>Technology</strong>Apple Vision Framework</span>
+    <span><strong>Version</strong>1.0 · August 2026</span>
+  </div>
+</div>
+
+<div class="section-header">
+  <div class="tag">Active — v1.0</div>
+  <h2>Supported Gestures</h2>
+  <p>All gestures below are currently live in the MadhurVision iOS app (Standalone VR mode).</p>
+</div>
+
+<div class="gesture-grid">
+
+  <div class="gesture-card">
+    <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_headgaze_1787546799280.jpg" alt="Head Gaze"/>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>Head Gaze</h3>
+      <div class="action">👀 Look to Navigate</div>
+      <p>Simply look in any direction inside the VR BOX headset. The 3D world rotates with your head at 120Hz via the iPhone's built-in gyroscope and accelerometer. The crosshair stays fixed at the center of your vision.</p>
+      <div class="tech-note"><strong>Tech:</strong> CMMotionManager at 1/120s → SCNNode.eulerAngles updated every frame. No camera required.</div>
+    </div>
+  </div>
+
+  <div class="gesture-card">
+    <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_point_1787546774853.jpg" alt="Index Point"/>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>Index Point</h3>
+      <div class="action">⚡ Aim the Virtual Cursor</div>
+      <p>Extend your index finger and point it toward the floating browser. A glowing cyan dot appears on the panel showing exactly where your finger aims.</p>
+      <div class="tech-note"><strong>Tech:</strong> VNHumanHandPoseObservation.indexTip → 3D raycast → SCNHitTest on browser plane.</div>
+    </div>
+  </div>
+
+  <div class="gesture-card">
+    <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_pinch_1787546738058.jpg" alt="Pinch"/>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>Pinch</h3>
+      <div class="action">🖱️ Click / Tap</div>
+      <p>Bring your index fingertip and thumb tip together. This fires a click at the position your cursor is aiming at on the floating browser window.</p>
+      <div class="tech-note"><strong>Tech:</strong> indexTip–thumbTip distance &lt; 6% of frame. 500ms cooldown. JS: <code>element.click()</code></div>
+    </div>
+  </div>
+
+  <div class="gesture-card">
+    <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_swipe_up_1787546749966.jpg" alt="Palm Swipe Up"/>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>Palm Swipe Up</h3>
+      <div class="action">⬆️ Scroll Up</div>
+      <p>Hold your palm open and move it upward. The floating browser scrolls up — like pulling a web page upward with your finger on a touchscreen.</p>
+      <div class="tech-note"><strong>Tech:</strong> Wrist landmark Y-delta between frames. Threshold: Δy &gt; 0.5%. JS: <code>window.scrollBy(0, -delta)</code></div>
+    </div>
+  </div>
+
+  <div class="gesture-card">
+    <img src="C:\Users\MDC\.gemini\antigravity-ide\brain\3458f1bb-db83-4e44-9def-2997f5a1d7ad\gesture_swipe_down_1787546764079.jpg" alt="Palm Swipe Down"/>
+    <div class="card-body">
+      <div class="badge badge-active">Active</div>
+      <h3>Palm Swipe Down</h3>
+      <div class="action">⬇️ Scroll Down</div>
+      <p>Hold your palm open and move it downward. The floating browser scrolls down to reveal more content below — more YouTube videos, longer articles, etc.</p>
+      <div class="tech-note"><strong>Tech:</strong> Same wrist Y-delta, negative direction. JS: <code>window.scrollBy(0, +delta)</code></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="section-header">
+  <div class="tag">Roadmap</div>
+  <h2>Planned Gesture Additions</h2>
+  <p>Update this table whenever a new gesture is added to the app.</p>
+</div>
+
+<div class="future-table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Gesture</th>
+        <th>Action</th>
+        <th>Detection Method</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Two-finger Pinch</td>
+        <td>Zoom In / Out</td>
+        <td>Distance between both hands' indexTip landmarks</td>
+        <td>Phase 2</td>
+      </tr>
+      <tr>
+        <td>Fist Clench</td>
+        <td>Grab &amp; Move Window</td>
+        <td>All fingertips below MCP joints → track wrist delta to move 3D node</td>
+        <td>Phase 2</td>
+      </tr>
+      <tr>
+        <td>Thumbs Up 👍</td>
+        <td>Like / Confirm</td>
+        <td>Thumb extended upward, all other fingers curled</td>
+        <td>Phase 3</td>
+      </tr>
+      <tr>
+        <td>Palm Push (Stop ✋)</td>
+        <td>Pause Video</td>
+        <td>Open palm facing camera, stationary — JS spacebar event</td>
+        <td>Phase 3</td>
+      </tr>
+      <tr>
+        <td>Victory Sign ✌️</td>
+        <td>Open New Window</td>
+        <td>Index + middle finger extended, others curled → spawn new VRBrowserNode</td>
+        <td>Phase 3</td>
+      </tr>
+      <tr>
+        <td>Air Keyboard</td>
+        <td>Type in Browser</td>
+        <td>Virtual QWERTY panel in scene; pinch on each key → JS keyboard events</td>
+        <td>Phase 4</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<footer>
+  <strong>MadhurVision</strong> — Gesture Reference v1.0 &nbsp;·&nbsp;
+  Apple Vision Framework &nbsp;·&nbsp; iOS Standalone VR &nbsp;·&nbsp; August 2026
+  <br/><br/>
+  <span style="font-size:11px">To add a new gesture: implement in <code>HandTrackingManager.swift</code> → wire in <code>HandCursorNode.swift</code> → update this document.</span>
+</footer>
+
+</body>
+</html>

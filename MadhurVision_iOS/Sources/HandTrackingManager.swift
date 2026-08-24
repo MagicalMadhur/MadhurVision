@@ -11,6 +11,8 @@ class HandTrackingManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     @Published var indexTipPosition: CGPoint = .zero   // 0–1 normalized screen coords
     @Published var isPinching: Bool = false
     @Published var scrollDelta: CGFloat = 0.0
+    @Published var isGrabbing: Bool = false             // fist clench = grab window
+    @Published var grabDelta: CGPoint = .zero            // how much the grabbed fist moved
 
     private let captureSession = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -25,6 +27,7 @@ class HandTrackingManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
     // Tracking state
     private var previousPalmY: CGFloat? = nil
+    private var previousGrabPos: CGPoint? = nil
     private var pinchCooldown = false
 
     private override init() {
@@ -95,11 +98,16 @@ class HandTrackingManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     // MARK: - Hand Landmark Processing
 
     private func processHandObservation(_ observation: VNHumanHandPoseObservation) {
-        guard let indexTip = try? observation.recognizedPoint(.indexTip),
-              let thumbTip = try? observation.recognizedPoint(.thumbTip),
-              let wrist    = try? observation.recognizedPoint(.wrist),
-              indexTip.confidence > 0.5,
-              thumbTip.confidence > 0.5 else { return }
+        guard let indexTip  = try? observation.recognizedPoint(.indexTip),
+              let indexMCP  = try? observation.recognizedPoint(.indexMCP),
+              let middleTip = try? observation.recognizedPoint(.middleTip),
+              let middleMCP = try? observation.recognizedPoint(.middleMCP),
+              let ringTip   = try? observation.recognizedPoint(.ringTip),
+              let ringMCP   = try? observation.recognizedPoint(.ringMCP),
+              let thumbTip  = try? observation.recognizedPoint(.thumbTip),
+              let wrist     = try? observation.recognizedPoint(.wrist),
+              indexTip.confidence > 0.3,
+              thumbTip.confidence > 0.3 else { return }
 
         // Vision coords: origin bottom-left, flip Y for screen coords
         let indexPos = CGPoint(x: indexTip.location.x,
@@ -109,26 +117,41 @@ class HandTrackingManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
         // Pinch detection — distance between index tip and thumb tip
         let pinchDist = hypot(indexPos.x - thumbPos.x, indexPos.y - thumbPos.y)
-        let pinchDetected = pinchDist < 0.06  // threshold: ~6% of frame width
+        let pinchDetected = pinchDist < 0.06
 
-        // Scroll detection — track wrist vertical movement
-        let palmY = 1.0 - wrist.location.y
-        var delta: CGFloat = 0
-        if let prevY = previousPalmY {
-            delta = palmY - prevY
+        // Fist / Grab detection — all fingertips below their MCP joints
+        let isFist = (indexTip.location.y < indexMCP.location.y) &&
+                     (middleTip.location.y < middleMCP.location.y) &&
+                     (ringTip.location.y < ringMCP.location.y)
+
+        let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
+
+        // Grab delta — how much the fist moved since last frame
+        var gDelta = CGPoint.zero
+        if isFist, let prev = previousGrabPos {
+            gDelta = CGPoint(x: wristPos.x - prev.x, y: wristPos.y - prev.y)
         }
-        previousPalmY = palmY
+        previousGrabPos = isFist ? wristPos : nil
+
+        // Scroll detection — track wrist vertical movement (only when NOT grabbing)
+        let palmY = 1.0 - wrist.location.y
+        var scrollD: CGFloat = 0
+        if !isFist, let prevY = previousPalmY {
+            scrollD = palmY - prevY
+        }
+        previousPalmY = isFist ? nil : palmY
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.indexTipPosition = indexPos
-            self.scrollDelta = delta
+            self.scrollDelta = scrollD
+            self.isGrabbing = isFist
+            self.grabDelta = gDelta
 
             // Debounce pinch to avoid rapid-fire clicks
-            if pinchDetected && !self.pinchCooldown {
+            if pinchDetected && !self.pinchCooldown && !isFist {
                 self.isPinching = true
                 self.pinchCooldown = true
-                // Reset after 0.5s
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     self.isPinching = false
                     self.pinchCooldown = false

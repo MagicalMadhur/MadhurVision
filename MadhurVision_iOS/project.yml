@@ -13,6 +13,10 @@ targets:
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         INFOPLIST_KEY_NSCameraUsageDescription: "Camera access is required for VR tracking."
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Local network access is required to connect to the PC."
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UIStatusBarHidden: "YES"
+        INFOPLIST_KEY_UIViewControllerBasedStatusBarAppearance: "NO"
+        INFOPLIST_KEY_UIRequiresFullScreen: "YES"
         CODE_SIGN_IDENTITY: ""
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGNING_ALLOWED: "NO"
