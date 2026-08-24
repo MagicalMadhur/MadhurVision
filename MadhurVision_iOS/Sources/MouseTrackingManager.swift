@@ -1,9 +1,8 @@
 import Foundation
-import GameController
 import Combine
 import UIKit
 
-class MouseTrackingManager: ObservableObject {
+class MouseTrackingManager: NSObject, ObservableObject, UIGestureRecognizerDelegate {
     static let shared = MouseTrackingManager()
     
     // Virtual position of the mouse on a 0.0 to 1.0 scale
@@ -13,57 +12,73 @@ class MouseTrackingManager: ObservableObject {
     
     private var isLocked = false
     
-    private init() { }
+    private override init() { super.init() }
     
     func start() {
         lockSystemPointer()
-        
-        NotificationCenter.default.addObserver(self, selector: #selector(mouseDidConnect), name: .GCMouseDidConnect, object: nil)
-        
-        if let mouse = GCMouse.current {
-            setupMouse(mouse)
+        setupGestures()
+    }
+    
+    private func setupGestures() {
+        DispatchQueue.main.async {
+            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = windowScene.windows.first else { return }
+            
+            // Pan gesture tracks continuous mouse movement (works without clicking when pointer is locked)
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(self.handlePan(_:)))
+            pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+            pan.delegate = self
+            window.addGestureRecognizer(pan)
+            
+            // Long press tracks instant mouse down / mouse up
+            let click = UILongPressGestureRecognizer(target: self, action: #selector(self.handleClick(_:)))
+            click.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+            click.minimumPressDuration = 0.0
+            click.delegate = self
+            window.addGestureRecognizer(click)
         }
     }
     
-    @objc private func mouseDidConnect(_ notification: Notification) {
-        guard let mouse = notification.object as? GCMouse else { return }
-        setupMouse(mouse)
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        
+        self.isMouseActive = true
+        
+        let delta = gesture.translation(in: view)
+        gesture.setTranslation(.zero, in: view)
+        
+        // Adjust sensitivity
+        let sensitivity: CGFloat = 0.0015
+        
+        var newX = self.virtualPosition.x + delta.x * sensitivity
+        var newY = self.virtualPosition.y + delta.y * sensitivity
+        
+        // Clamp to screen bounds
+        newX = max(0.01, min(0.99, newX))
+        newY = max(0.01, min(0.99, newY))
+        
+        self.virtualPosition = CGPoint(x: newX, y: newY)
     }
     
-    private func setupMouse(_ mouse: GCMouse) {
-        mouse.mouseInput?.mouseMovedHandler = { [weak self] mouse, deltaX, deltaY in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.isMouseActive = true
-                
-                // Adjust sensitivity (delta is usually in points)
-                let sensitivity: CGFloat = 0.0015
-                
-                var newX = self.virtualPosition.x + CGFloat(deltaX) * sensitivity
-                var newY = self.virtualPosition.y - CGFloat(deltaY) * sensitivity // Y is inverted in GameController
-                
-                // Clamp to screen bounds (0 to 1)
-                newX = max(0.01, min(0.99, newX))
-                newY = max(0.01, min(0.99, newY))
-                
-                self.virtualPosition = CGPoint(x: newX, y: newY)
-            }
-        }
+    @objc private func handleClick(_ gesture: UILongPressGestureRecognizer) {
+        self.isMouseActive = true
         
-        mouse.mouseInput?.leftButton.pressedChangedHandler = { [weak self] button, value, pressed in
-            DispatchQueue.main.async {
-                self?.isLeftClicking = pressed
-                self?.isMouseActive = true
-            }
+        if gesture.state == .began {
+            self.isLeftClicking = true
+        } else if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
+            self.isLeftClicking = false
         }
+    }
+    
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        return true
     }
     
     private func lockSystemPointer() {
         guard !isLocked else { return }
         isLocked = true
         
-        // Swizzle prefersPointerLocked on UIViewController to completely hide the iOS assistive touch mouse
-        // and lock it in place, allowing GCMouse to read raw deltas continuously.
+        // Swizzle prefersPointerLocked on UIViewController to hide the assistive touch mouse
         let originalSelector = #selector(getter: UIViewController.prefersPointerLocked)
         let swizzledSelector = #selector(getter: UIViewController.swizzled_prefersPointerLocked)
         
