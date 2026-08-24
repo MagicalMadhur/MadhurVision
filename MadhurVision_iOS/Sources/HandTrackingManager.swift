@@ -45,11 +45,6 @@ class HandTrackingManager: NSObject {
         previousPalmY = nil
     }
 
-    /// Called by PassthroughManager with each camera frame
-    func processFrame(_ pixelBuffer: CVPixelBuffer) {
-        guard isRunning, !isProcessingFrame else { return }
-        isProcessingFrame = true
-        
     private let processingQueue = DispatchQueue(label: "HandTrackingQueue", qos: .userInteractive)
 
     /// Called by PassthroughManager with each camera frame
