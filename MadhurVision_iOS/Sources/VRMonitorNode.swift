@@ -1045,7 +1045,145 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 transition: all 0.2s;
             }
             .action-btn:hover { background: #00d4ff; color: #000; }
-        </style>
+            
+            /* YouTube Spatial Cinema View */
+            #youtube-view {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+                max-width: 1100px;
+                margin: 0 auto;
+            }
+            .cinema-wrapper {
+                background: #000;
+                border-radius: 20px;
+                overflow: hidden;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 30px rgba(0, 212, 255, 0.2);
+                border: 2px solid rgba(0, 212, 255, 0.4);
+                position: relative;
+                width: 100%;
+                aspect-ratio: 16 / 9;
+            }
+            .cinema-wrapper iframe {
+                width: 100%;
+                height: 100%;
+                border: none;
+                display: block;
+            }
+            .yt-toolbar {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                background: rgba(255,255,255,0.04);
+                padding: 10px 16px;
+                border-radius: 14px;
+                border: 1px solid rgba(255,255,255,0.08);
+            }
+            .yt-search-input {
+                flex: 1;
+                height: 40px;
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 10px;
+                color: #fff;
+                padding: 0 14px;
+                font-size: 15px;
+                outline: none;
+            }
+            .yt-search-input:focus {
+                border-color: #00d4ff;
+                background: rgba(0,212,255,0.1);
+            }
+            .yt-search-btn {
+                height: 40px;
+                padding: 0 20px;
+                background: #ff0000;
+                color: #fff;
+                border: none;
+                border-radius: 10px;
+                font-weight: 700;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                transition: transform 0.2s;
+            }
+            .yt-search-btn:hover { transform: scale(1.05); }
+            
+            .yt-chips {
+                display: flex;
+                gap: 10px;
+                overflow-x: auto;
+                padding-bottom: 4px;
+            }
+            .yt-chip {
+                padding: 6px 16px;
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 20px;
+                font-size: 13px;
+                font-weight: 600;
+                color: rgba(255,255,255,0.8);
+                cursor: pointer;
+                white-space: nowrap;
+                transition: all 0.2s;
+            }
+            .yt-chip:hover {
+                background: rgba(0, 212, 255, 0.2);
+                border-color: #00d4ff;
+                color: #fff;
+            }
+            
+            .yt-section-title {
+                font-size: 18px;
+                font-weight: 700;
+                color: #fff;
+                margin-top: 10px;
+            }
+            
+            .yt-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 16px;
+            }
+            .yt-card {
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 14px;
+                overflow: hidden;
+                cursor: pointer;
+                transition: all 0.25s;
+            }
+            .yt-card:hover {
+                background: rgba(0, 212, 255, 0.12);
+                border-color: #00d4ff;
+                transform: translateY(-4px);
+                box-shadow: 0 8px 24px rgba(0, 212, 255, 0.2);
+            }
+            .yt-thumb {
+                width: 100%;
+                aspect-ratio: 16 / 9;
+                object-fit: cover;
+                background: #111;
+                display: block;
+            }
+            .yt-info {
+                padding: 10px 12px;
+            }
+            .yt-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #fff;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+            .yt-channel {
+                font-size: 12px;
+                color: rgba(255,255,255,0.5);
+                margin-top: 4px;
+            }
         </head>
         <body>
         
@@ -1142,6 +1280,66 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                                 <div class="app-card-icon">⚙️</div>
                                 <div class="app-card-title">System Settings</div>
                                 <div class="app-card-desc">Adjust screen size, IPD, and tracking</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- YOUTUBE SPATIAL CINEMA VIEW -->
+                    <div class="content-view" id="youtube-view">
+                        <!-- THEATER SCREEN -->
+                        <div class="cinema-wrapper">
+                            <iframe id="cinema-iframe" 
+                                    src="https://www.youtube-nocookie.com/embed/LXb3EKWsInQ?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1" 
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                                    allowfullscreen>
+                            </iframe>
+                        </div>
+                        
+                        <!-- SEARCH TOOLBAR -->
+                        <div class="yt-toolbar">
+                            <input type="text" id="yt-search-box" class="yt-search-input" placeholder="Search YouTube or paste any video link/ID...">
+                            <button class="yt-search-btn" onclick="submitYouTubeSearch()">▶ Play</button>
+                        </div>
+                        
+                        <!-- QUICK CHIPS -->
+                        <div class="yt-chips">
+                            <div class="yt-chip" onclick="playYouTubeVideo('LXb3EKWsInQ', '4K Relaxing Nature (Earth 4K HDR)')">🌿 Nature 4K HDR</div>
+                            <div class="yt-chip" onclick="playYouTubeVideo('jfKfPfyJRdk', 'Lofi Hip Hop Radio - Beats to Relax/Study')">🎧 Lofi Chill Beats</div>
+                            <div class="yt-chip" onclick="playYouTubeVideo('9No-FiEInLA', 'Interstellar IMAX Theme & Space Experience')">🚀 Interstellar IMAX</div>
+                            <div class="yt-chip" onclick="playYouTubeVideo('dQw4w9WgXcQ', 'Never Gonna Give You Up')">🎵 80s Music Hits</div>
+                            <div class="yt-chip" onclick="playYouTubeVideo('M576WGiDBdQ', 'Apple Vision Pro Spatial Computing Demo')">🥽 Vision Pro Spatial</div>
+                        </div>
+                        
+                        <!-- SHOWCASE GRID -->
+                        <div class="yt-section-title">Featured Cinema Videos</div>
+                        <div class="yt-grid">
+                            <div class="yt-card" onclick="playYouTubeVideo('LXb3EKWsInQ', 'Earth 4K 60FPS HDR Nature')">
+                                <img class="yt-thumb" src="https://img.youtube.com/vi/LXb3EKWsInQ/hqdefault.jpg" alt="Nature">
+                                <div class="yt-info">
+                                    <div class="yt-title">Earth 4K 60FPS HDR • Breathtaking Wildlife & Landscapes</div>
+                                    <div class="yt-channel">BBC Earth</div>
+                                </div>
+                            </div>
+                            <div class="yt-card" onclick="playYouTubeVideo('jfKfPfyJRdk', 'Lofi Hip Hop Radio')">
+                                <img class="yt-thumb" src="https://img.youtube.com/vi/jfKfPfyJRdk/hqdefault.jpg" alt="Lofi">
+                                <div class="yt-info">
+                                    <div class="yt-title">Lofi Girl • Beats to Relax / Study / Chill to in VR</div>
+                                    <div class="yt-channel">Lofi Girl</div>
+                                </div>
+                            </div>
+                            <div class="yt-card" onclick="playYouTubeVideo('9No-FiEInLA', 'Interstellar Space Flight')">
+                                <img class="yt-thumb" src="https://img.youtube.com/vi/9No-FiEInLA/hqdefault.jpg" alt="Space">
+                                <div class="yt-info">
+                                    <div class="yt-title">Interstellar Cosmic Flight • Deep Space Cinema 4K</div>
+                                    <div class="yt-channel">Hans Zimmer Soundtrack</div>
+                                </div>
+                            </div>
+                            <div class="yt-card" onclick="playYouTubeVideo('M576WGiDBdQ', 'Spatial Computing VR Experience')">
+                                <img class="yt-thumb" src="https://img.youtube.com/vi/M576WGiDBdQ/hqdefault.jpg" alt="VR">
+                                <div class="yt-info">
+                                    <div class="yt-title">Spatial VR Computing Showcase & Interface Walkthrough</div>
+                                    <div class="yt-channel">Tech Vision VR</div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1252,7 +1450,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             var di = document.getElementById('dock-' + app);
             if (di) di.classList.add('active');
             
-            var titles = {home: 'Home', settings: 'System Settings'};
+            var titles = {home: 'Home', youtube: 'YouTube Cinema', settings: 'System Settings'};
             document.getElementById('app-title').textContent = titles[app] || app;
             
             document.querySelectorAll('.content-view').forEach(function(v) { v.classList.remove('active'); });
@@ -1260,13 +1458,64 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             if (target) target.classList.add('active');
         }
         
+        // YouTube Spatial Cinema Engine
+        function extractYouTubeId(urlOrText) {
+            if (!urlOrText) return null;
+            var text = urlOrText.trim();
+            // Direct ID (11 chars)
+            if (/^[a-zA-Z0-9_-]{11}$/.test(text)) return text;
+            // Short URL youtu.be/ID
+            var shortMatch = text.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+            if (shortMatch) return shortMatch[1];
+            // Standard URL youtube.com/watch?v=ID
+            var watchMatch = text.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+            if (watchMatch) return watchMatch[1];
+            // Embed URL youtube.com/embed/ID
+            var embedMatch = text.match(/embed\/([a-zA-Z0-9_-]{11})/);
+            if (embedMatch) return embedMatch[1];
+            // Shorts URL youtube.com/shorts/ID
+            var shortsMatch = text.match(/shorts\/([a-zA-Z0-9_-]{11})/);
+            if (shortsMatch) return shortsMatch[1];
+            return null;
+        }
+        
+        function playYouTubeVideo(videoId, title) {
+            var iframe = document.getElementById('cinema-iframe');
+            if (iframe && videoId) {
+                iframe.src = 'https://www.youtube-nocookie.com/embed/' + videoId + '?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1';
+            }
+            switchApp('youtube');
+            var container = document.getElementById('active-content');
+            if (container) container.scrollTo({top: 0, behavior: 'smooth'});
+        }
+        
+        function submitYouTubeSearch() {
+            var input = document.getElementById('yt-search-box');
+            if (!input || !input.value) return;
+            var query = input.value.trim();
+            var id = extractYouTubeId(query);
+            if (id) {
+                playYouTubeVideo(id);
+            } else {
+                // Navigate to YouTube embed search or web search
+                wkMsg('navigate', {url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query)});
+            }
+        }
+        
+        document.getElementById('yt-search-box')?.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitYouTubeSearch();
+            }
+        });
+
         // Navigation Shortcuts
         function launchGoogle() {
             wkMsg('navigate', {url: 'https://www.google.com'});
         }
         
         function launchYouTube() {
-            wkMsg('navigate', {url: 'https://www.youtube.com'});
+            switchApp('youtube');
         }
         
         function openPresetURL(url) {
@@ -1275,7 +1524,13 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         
         function submitURL() {
             var url = document.getElementById('url-input').value;
-            if (url) wkMsg('navigate', {url: url});
+            if (!url) return;
+            var ytId = extractYouTubeId(url);
+            if (ytId) {
+                playYouTubeVideo(ytId);
+            } else {
+                wkMsg('navigate', {url: url});
+            }
         }
         
         document.getElementById('url-input').addEventListener('keydown', function(e) {
