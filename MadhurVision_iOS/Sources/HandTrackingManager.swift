@@ -56,6 +56,7 @@ class HandTrackingManager: NSObject {
     private var resetCooldown = false
     private var openPalmStartedAt: Date?
     private var isRunning = false
+    private let oneEuroFilter = OneEuroFilter2D(minCutoff: 1.1, beta: 0.007, dCutoff: 1.0)
     /// Last good cursor position before a pinch started. Used to freeze the
     /// click location so it lands exactly where the user was pointing.
     private var lastGoodCursorPosition: CGPoint = .zero
@@ -251,16 +252,22 @@ class HandTrackingManager: NSObject {
         let clickDetected   = isPointing && !pinchCooldown && (thumbMiddleDist < 0.038 || thumbIndexDist < 0.035)
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
+        let indexMCPPos = CGPoint(x: indexMCP.location.x, y: 1.0 - indexMCP.location.y)
         let palmSpan = distance(indexMCP, wrist)
+
+        // Biomechanical Pointing Bone Coordinate (Weighted Index Ray) filtered by 1€ filter
+        let rawPointing = CGPoint(x: indexPos.x * 0.85 + indexMCPPos.x * 0.15, y: indexPos.y * 0.85 + indexMCPPos.y * 0.15)
+        let filteredPointing = oneEuroFilter.filter(point: rawPointing)
 
         // Freeze cursor on click so it never drifts
         let cursorPosition: CGPoint
         if pinchCooldown {
             cursorPosition = lastGoodCursorPosition
         } else if isPointing {
-            lastGoodCursorPosition = indexPos
-            cursorPosition = indexPos
+            lastGoodCursorPosition = filteredPointing
+            cursorPosition = filteredPointing
         } else {
+            oneEuroFilter.reset()
             cursorPosition = .zero
         }
 

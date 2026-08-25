@@ -113,7 +113,7 @@ class HandCursorNode: SCNNode {
 
     // MARK: - Update per frame
 
-    private var smoothedFingerPos: CGPoint? = nil
+    private let oneEuroFilter = OneEuroFilter2D(minCutoff: 1.0, beta: 0.008, dCutoff: 1.0)
     private var previousIsPinching = false
 
     func update(fingerPos: CGPoint,
@@ -125,23 +125,13 @@ class HandCursorNode: SCNNode {
         guard fingerPos != .zero else {
             laserNode.isHidden = true
             reticleNode.isHidden = true
-            smoothedFingerPos = nil
+            oneEuroFilter.reset()
             previousIsPinching = false
             return
         }
 
-        // Responsive low-pass filter (alpha = 0.28 for crisp hand tracing)
-        if smoothedFingerPos == nil {
-            smoothedFingerPos = fingerPos
-        } else {
-            let alpha: CGFloat = 0.28
-            let current = smoothedFingerPos!
-            smoothedFingerPos = CGPoint(
-                x: current.x + (fingerPos.x - current.x) * alpha,
-                y: current.y + (fingerPos.y - current.y) * alpha
-            )
-        }
-        let pos = smoothedFingerPos!
+        // Apply adaptive 1€ Filter (Zero jitter when resting, 0ms lag when moving)
+        let pos = oneEuroFilter.filter(point: fingerPos)
 
         // Map 2D camera coordinates with 2.4x sensitivity boost
         let sensitivity: Float = 2.4
