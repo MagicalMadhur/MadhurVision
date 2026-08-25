@@ -112,14 +112,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             forMainFrameOnly: true
         )
         webConfig.userContentController.addUserScript(keyboardScript)
-
-        // Video Auto-Play & In-line Playback script
-        let videoScript = WKUserScript(
-            source: VRMonitorNode.videoPlaybackHelperJS(),
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: false
-        )
-        webConfig.userContentController.addUserScript(videoScript)
         
         webView = WKWebView(
             frame: CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight),
@@ -564,57 +556,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         """
     }
 
-    // MARK: - Video Playback Helper JS
-    
-    private static func videoPlaybackHelperJS() -> String {
-        return """
-        (function() {
-            function enforceInlineAndPlay() {
-                var videos = document.querySelectorAll('video');
-                videos.forEach(function(v) {
-                    v.setAttribute('playsinline', 'true');
-                    v.setAttribute('webkit-playsinline', 'true');
-                    v.removeAttribute('controlslist');
-                    v.muted = false;
-                    
-                    if (v.paused && !v.ended && v.readyState >= 1) {
-                        var p = v.play();
-                        if (p !== undefined) {
-                            p.catch(function(e) {
-                                // Fallback: play muted if unmuted autoplay is rejected by site
-                                v.muted = true;
-                                v.play().then(function() { v.muted = false; }).catch(function(){});
-                            });
-                        }
-                    }
-                });
-                
-                // Auto-click YouTube play & unmute buttons
-                var unmuteBtn = document.querySelector('.ytp-unmute, .ytp-unmute-inner, button[aria-label*="Unmute" i]');
-                if (unmuteBtn && unmuteBtn.offsetParent !== null) {
-                    unmuteBtn.click();
-                }
-                
-                var ytpPlay = document.querySelector('.ytp-large-play-button, .player-controls-middle button, .player-control-play-pause-icon');
-                if (ytpPlay && ytpPlay.offsetParent !== null) {
-                    ytpPlay.click();
-                }
-            }
-            setInterval(enforceInlineAndPlay, 600);
-            
-            function wakeAudioAndVideo() {
-                var videos = document.querySelectorAll('video');
-                videos.forEach(function(v) {
-                    v.muted = false;
-                    if (v.paused) v.play().catch(function(){});
-                });
-            }
-            document.addEventListener('click', wakeAudioAndVideo, true);
-            document.addEventListener('touchend', wakeAudioAndVideo, true);
-            document.addEventListener('pointerup', wakeAudioAndVideo, true);
-        })();
-        """
-    }
     
     // MARK: - Air Keyboard JS (Universal on all websites & apps)
     
