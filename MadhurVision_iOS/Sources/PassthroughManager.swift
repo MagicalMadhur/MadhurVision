@@ -4,7 +4,8 @@ import UIKit
 import CoreImage
 
 /// Pipes the rear camera feed directly into SceneKit's scene background
-/// to create a "passthrough" mixed-reality effect.
+/// as a CGImage to create a stereoscopic "passthrough" mixed-reality effect
+/// that renders equally for both left and right eye views.
 /// Also shares frames with HandTrackingManager (single session, no conflicts).
 class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     static let shared = PassthroughManager()
@@ -15,20 +16,31 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
 
     private let videoOutput = AVCaptureVideoDataOutput()
     private let processingQueue = DispatchQueue(label: "PassthroughQueue", qos: .userInteractive)
+    private let ciContext = CIContext(options: [
+        .useSoftwareRenderer: false,
+        .priorityRequestLow: false
+    ])
 
     private var isConfigured = false
+    private var frameCount = 0
 
     private override init() {
         super.init()
     }
 
-    /// Configures camera connections before any preview layer is created.
-    /// AVCaptureVideoPreviewLayer only auto-connects to inputs that already
-    /// exist, so preparing here prevents one eye from getting a nil preview
-    /// connection while the other happens to connect later.
+    /// Configures camera connections
     @discardableResult
     func prepare() -> Bool {
         guard !isConfigured else { return true }
+        
+        let authStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        AppLogger.shared.log("[PassthroughManager] Camera Authorization Status: \(authStatus.rawValue)")
+        if authStatus == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                AppLogger.shared.log("[PassthroughManager] Camera permission response: \(granted)")
+            }
+        }
+        
         isConfigured = true
         captureSession.beginConfiguration()
         captureSession.sessionPreset = .hd1280x720
@@ -37,12 +49,15 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
               let input = try? AVCaptureDeviceInput(device: device) else {
             captureSession.commitConfiguration()
             isConfigured = false
-            print("[PassthroughManager] Could not access rear camera")
+            AppLogger.shared.log("[PassthroughManager] ERROR: Could not access rear camera device")
             return false
         }
+        
+        AppLogger.shared.log("[PassthroughManager] Rear camera found: \(device.localizedName)")
 
         if captureSession.canAddInput(input) {
             captureSession.addInput(input)
+            AppLogger.shared.log("[PassthroughManager] Camera input attached")
         }
 
         videoOutput.setSampleBufferDelegate(self, queue: processingQueue)
@@ -53,6 +68,7 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
 
         if captureSession.canAddOutput(videoOutput) {
             captureSession.addOutput(videoOutput)
+            AppLogger.shared.log("[PassthroughManager] Video output attached")
         }
 
         captureSession.commitConfiguration()
@@ -62,8 +78,9 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
             device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
             device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
             device.unlockForConfiguration()
+            AppLogger.shared.log("[PassthroughManager] Camera framerate set to 30 FPS")
         } catch {
-            print("[PassthroughManager] Could not configure framerate")
+            AppLogger.shared.log("[PassthroughManager] Warning: Could not configure framerate: \(error)")
         }
 
         return true
@@ -71,14 +88,22 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
 
     func start(scene: SCNScene) {
         self.scene = scene
-        guard prepare(), !captureSession.isRunning else { return }
+        guard prepare() else {
+            AppLogger.shared.log("[PassthroughManager] prepare() failed, cannot start session")
+            return
+        }
+        
+        guard !captureSession.isRunning else { return }
 
         processingQueue.async {
+            AppLogger.shared.log("[PassthroughManager] Starting captureSession...")
             self.captureSession.startRunning()
+            AppLogger.shared.log("[PassthroughManager] captureSession isRunning = \(self.captureSession.isRunning)")
         }
     }
 
     func stop() {
+        AppLogger.shared.log("[PassthroughManager] Stopping captureSession")
         captureSession.stopRunning()
     }
 
@@ -87,12 +112,21 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
-        // Render camera feed as the SceneKit scene background. Both eyes share
-        // the same SCNScene, so both automatically see the camera. CIImage from
-        // CVPixelBuffer is lazy (zero-copy), making this very efficient.
+        frameCount += 1
+        if frameCount == 1 {
+            let width = CVPixelBufferGetWidth(pixelBuffer)
+            let height = CVPixelBufferGetHeight(pixelBuffer)
+            AppLogger.shared.log("[PassthroughManager] First frame received! Dimensions: \(width)x\(height)")
+        }
+        
+        // Convert CVPixelBuffer to CGImage for SceneKit background.
+        // SceneKit requires CGImage or UIImage (it ignores raw CIImage).
+        // Since both eyes render the same SCNScene, both eyes display the camera feed!
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        DispatchQueue.main.async { [weak self] in
-            self?.scene?.background.contents = ciImage
+        if let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) {
+            DispatchQueue.main.async { [weak self] in
+                self?.scene?.background.contents = cgImage
+            }
         }
         
         // Feed raw frame to HandTrackingManager (runs its own async vision queue)

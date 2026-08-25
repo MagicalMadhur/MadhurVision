@@ -228,13 +228,16 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     // MARK: - Lifecycle
     
     func start() {
+        AppLogger.shared.log("[VREngine] Starting VR Engine...")
         referenceAttitude = nil
         startHeadTracking()
         startPassthrough()
         startTracking()
+        AppLogger.shared.log("[VREngine] VR Engine started successfully")
     }
     
     func stop() {
+        AppLogger.shared.log("[VREngine] Stopping VR Engine...")
         motionManager.stopDeviceMotionUpdates()
         monitorNode?.cleanup()
         PassthroughManager.shared.stop()
@@ -264,9 +267,9 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     }
     
     func setPassthrough(enabled: Bool) {
+        AppLogger.shared.log("[VREngine] Passthrough toggled: \(enabled)")
         if enabled {
             PassthroughManager.shared.start(scene: scene)
-            enqueueSceneInput { $0.passthroughBackground = UIColor.clear }
         } else {
             PassthroughManager.shared.stop()
             enqueueSceneInput {

@@ -68,16 +68,21 @@ class HandTrackingManager: NSObject {
         super.init()
     }
 
+    private var didLogFirstVision = false
+    private var didLogFirstHandDetected = false
+
     func start() {
         stateLock.lock()
         isRunning = true
         stateLock.unlock()
+        AppLogger.shared.log("[HandTrackingManager] Started tracking")
     }
 
     func stop() {
         stateLock.lock()
         isRunning = false
         stateLock.unlock()
+        AppLogger.shared.log("[HandTrackingManager] Stopped tracking")
 
         // previousPalmY belongs to the serial Vision queue.
         processingQueue.async { [weak self] in
@@ -128,10 +133,16 @@ class HandTrackingManager: NSObject {
     private func runVision(on pixelBuffer: CVPixelBuffer) {
         guard isTracking else { return }
 
+        if !didLogFirstVision {
+            didLogFirstVision = true
+            AppLogger.shared.log("[HandTrackingManager] First Vision frame running")
+        }
+
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         do {
             try handler.perform([handPoseRequest])
         } catch {
+            AppLogger.shared.log("[HandTrackingManager] Vision error: \(error)")
             return
         }
 
@@ -144,6 +155,11 @@ class HandTrackingManager: NSObject {
             }
             previousPalmY = nil
             return
+        }
+
+        if !didLogFirstHandDetected {
+            didLogFirstHandDetected = true
+            AppLogger.shared.log("[HandTrackingManager] First hand successfully detected by Vision!")
         }
 
         processHandObservation(observation)
