@@ -253,9 +253,25 @@ class HandTrackingManager: NSObject {
         let indexMCPPos = CGPoint(x: indexMCP.location.x, y: 1.0 - indexMCP.location.y)
         let palmSpan = distance(indexMCP, wrist)
 
-        // Biomechanical Pointing Bone Coordinate (Weighted Index Ray) filtered by 1€ filter
-        let rawPointing = CGPoint(x: indexPos.x * 0.85 + indexMCPPos.x * 0.15, y: indexPos.y * 0.85 + indexMCPPos.y * 0.15)
-        let filteredPointing = oneEuroFilter.filter(point: rawPointing)
+        // Biomechanical 3D Bone Ray Projection (Index Knuckle -> Index Tip)
+        let dirX = indexPos.x - indexMCPPos.x
+        let dirY = indexPos.y - indexMCPPos.y
+        let boneLength = hypot(dirX, dirY)
+        
+        let extendedPointing: CGPoint
+        if boneLength > 0.02 {
+            let normDirX = dirX / boneLength
+            let normDirY = dirY / boneLength
+            // Project ray slightly forward along finger bone axis
+            extendedPointing = CGPoint(
+                x: max(0.0, min(1.0, indexPos.x + normDirX * 0.08)),
+                y: max(0.0, min(1.0, indexPos.y + normDirY * 0.08))
+            )
+        } else {
+            extendedPointing = indexPos
+        }
+        
+        let filteredPointing = oneEuroFilter.filter(point: extendedPointing)
 
         // Freeze cursor on click so it never drifts
         let cursorPosition: CGPoint

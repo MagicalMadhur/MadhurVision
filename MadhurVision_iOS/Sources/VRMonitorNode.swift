@@ -540,6 +540,23 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     private static func videoPlaybackHelperJS() -> String {
         return """
         (function() {
+            // Auto-embed converter: If navigating to a YouTube watch page, load the clean embed player
+            // which renders via standard HTML5 Canvas without DRM overlay, fully captured in VR!
+            function checkYouTubeWatchURL() {
+                var href = window.location.href;
+                if (href.indexOf('youtube.com/watch') !== -1 || href.indexOf('m.youtube.com/watch') !== -1) {
+                    var match = href.match(/[?&]v=([^&]+)/);
+                    if (match && match[1]) {
+                        var videoId = match[1];
+                        var embedUrl = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&playsinline=1&enablejsapi=1&rel=0';
+                        if (window.location.href !== embedUrl) {
+                            window.location.replace(embedUrl);
+                        }
+                    }
+                }
+            }
+            setInterval(checkYouTubeWatchURL, 400);
+
             // Ensure inline video playback flags on all video elements
             function enforceInlineVideos() {
                 var videos = document.querySelectorAll('video');
