@@ -201,20 +201,20 @@ class HandTrackingManager: NSObject {
         }
 
         // Finger extension is measured relative to the wrist instead of using
-        // only vertical screen coordinates. The former still works when the
-        // user points sideways, which was the source of false fist detections.
+        // only vertical screen coordinates.
         func isExtended(_ tip: VNRecognizedPoint, _ knuckle: VNRecognizedPoint) -> Bool {
-            guard tip.confidence > 0.5, knuckle.confidence > 0.3 else { return false }
-            return distance(tip, wrist) > distance(knuckle, wrist) * 1.25
+            guard tip.confidence > 0.25, knuckle.confidence > 0.20 else { return false }
+            return distance(tip, wrist) > distance(knuckle, wrist) * 1.15
         }
 
         func isCurled(_ tip: VNRecognizedPoint, _ knuckle: VNRecognizedPoint) -> Bool {
-            guard tip.confidence > 0.5, knuckle.confidence > 0.3 else { return false }
+            guard tip.confidence > 0.25, knuckle.confidence > 0.20 else { return false }
             return distance(tip, wrist) <= distance(knuckle, wrist) * 1.15
         }
 
         let indexExtended  = isExtended(indexTip, indexMCP)
         let middleExtended = isExtended(middleTip, middleMCP)
+        let ringExtended   = isExtended(ringTip, ringMCP)
         let middleCurled   = isCurled(middleTip, middleMCP)
         let ringCurled     = isCurled(ringTip, ringMCP)
         let littleCurled: Bool
@@ -234,16 +234,14 @@ class HandTrackingManager: NSObject {
         // GESTURE 1: Grab (Closed Fist — all 4 curled + thumb folded)
         let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
 
-        // GESTURE 2: Reset (Open Palm ✋ — all 5 fingers extended flat facing camera)
-        let isOpenPalm = thumbExtended && indexExtended && middleExtended && !ringCurled && !littleCurled
+        // GESTURE 2: Reset (Open Palm ✋ — all fingers extended flat facing camera)
+        let isOpenPalm = indexExtended && middleExtended && ringExtended
 
-        // GESTURE 3: Two-Finger Scroll ✌️ (Index + Middle extended, Ring + Little curled)
-        // Moving hand vertically in this mode scrolls web pages with smooth momentum.
-        let isTwoFingerScroll = indexExtended && middleExtended && ringCurled && littleCurled && !isFist && !isOpenPalm
+        // GESTURE 3: Two-Finger Scroll ✌️ (Index + Middle extended)
+        let isTwoFingerScroll = indexExtended && middleExtended && !isFist && !isOpenPalm
 
-        // GESTURE 4: Single-Finger Point 👆 (Index extended, Middle curled or click cooldown)
-        // Laser pointer is active only in this mode, preventing accidental clicks while scrolling.
-        let isPointing = (indexExtended && middleCurled && !isFist && !isTwoFingerScroll && !isOpenPalm) || pinchCooldown
+        // GESTURE 4: Single-Finger Point 👆 (Index extended, not scrolling, not fist, not open palm)
+        let isPointing = (indexExtended && !isTwoFingerScroll && !isFist && !isOpenPalm) || pinchCooldown
 
         // CLICK GESTURE (active only during Pointing):
         // Requires extreme closeness / true touching (distance < 0.038) to prevent false clicks with light gaps
