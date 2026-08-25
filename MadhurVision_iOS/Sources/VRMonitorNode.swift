@@ -124,10 +124,10 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         // Modern iPad Safari User Agent (standard iOS browser environment with full H.264 hardware decoding & inline playback)
         webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
         
-        // Load OS HTML
+        // Load OS HTML with https://www.youtube.com origin to authorize YouTube IFrame Embed API
         let osHTML = VRMonitorNode.generateOSHTML()
         VRMonitorNode.cachedOSHTML = osHTML
-        webView.loadHTMLString(osHTML, baseURL: nil)
+        webView.loadHTMLString(osHTML, baseURL: URL(string: "https://www.youtube.com"))
     }
     
     private func attachWebViewAndStartCapture() {
@@ -293,7 +293,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     func goHome() {
         isShowingOS = true
         if let html = VRMonitorNode.cachedOSHTML {
-            webView?.loadHTMLString(html, baseURL: nil)
+            webView?.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
@@ -780,6 +780,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="referrer" content="strict-origin-when-cross-origin">
         <title>MadhurVision OS 2.0</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1290,7 +1291,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                         <!-- THEATER SCREEN -->
                         <div class="cinema-wrapper">
                             <iframe id="cinema-iframe" 
-                                    src="https://www.youtube-nocookie.com/embed/LXb3EKWsInQ?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1" 
+                                    src="https://www.youtube.com/embed/LXb3EKWsInQ?autoplay=1&playsinline=1&enablejsapi=1&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com&rel=0&modestbranding=1" 
+                                    referrerpolicy="strict-origin"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
                                     allowfullscreen>
                             </iframe>
@@ -1483,7 +1485,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         function playYouTubeVideo(videoId, title) {
             var iframe = document.getElementById('cinema-iframe');
             if (iframe && videoId) {
-                iframe.src = 'https://www.youtube-nocookie.com/embed/' + videoId + '?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1';
+                iframe.src = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&playsinline=1&enablejsapi=1&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com&rel=0&modestbranding=1';
             }
             switchApp('youtube');
             var container = document.getElementById('active-content');
