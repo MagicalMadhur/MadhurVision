@@ -1465,16 +1465,16 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             // Direct ID (11 chars)
             if (/^[a-zA-Z0-9_-]{11}$/.test(text)) return text;
             // Short URL youtu.be/ID
-            var shortMatch = text.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+            var shortMatch = text.match(new RegExp('youtu\\\\.be/([a-zA-Z0-9_-]{11})'));
             if (shortMatch) return shortMatch[1];
             // Standard URL youtube.com/watch?v=ID
-            var watchMatch = text.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+            var watchMatch = text.match(new RegExp('[?&]v=([a-zA-Z0-9_-]{11})'));
             if (watchMatch) return watchMatch[1];
             // Embed URL youtube.com/embed/ID
-            var embedMatch = text.match(/embed\/([a-zA-Z0-9_-]{11})/);
+            var embedMatch = text.match(new RegExp('embed/([a-zA-Z0-9_-]{11})'));
             if (embedMatch) return embedMatch[1];
             // Shorts URL youtube.com/shorts/ID
-            var shortsMatch = text.match(/shorts\/([a-zA-Z0-9_-]{11})/);
+            var shortsMatch = text.match(new RegExp('shorts/([a-zA-Z0-9_-]{11})'));
             if (shortsMatch) return shortsMatch[1];
             return null;
         }
