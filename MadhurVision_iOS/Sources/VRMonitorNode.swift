@@ -238,10 +238,11 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     }
                     
                     // Suppress native iOS mobile software keyboard and open VR Air Keyboard
-                    var inputEl = el.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"]');
+                    var inputEl = el.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], #search, #search-input, ytd-searchbox, form#search-form, [aria-label*="Search" i], [placeholder*="Search" i]') || el.querySelector('input, textarea');
                     if(inputEl) {
-                        inputEl.setAttribute('inputmode', 'none');
-                        inputEl.focus();
+                        var actualInput = (inputEl.tagName === 'INPUT' || inputEl.tagName === 'TEXTAREA') ? inputEl : (inputEl.querySelector('input, textarea') || inputEl);
+                        actualInput.setAttribute('inputmode', 'none');
+                        actualInput.focus();
                         var kb = document.getElementById('vr-air-keyboard');
                         if(kb) kb.classList.add('visible');
                     }
@@ -690,11 +691,15 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                             target.value += ' ';
                         } else if (key === '↵ GO') {
                             kb.classList.remove('visible');
-                            if (target.form) { target.form.submit(); }
-                            else {
-                                var ev = new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true});
-                                target.dispatchEvent(ev);
+                            var form = target.closest('form') || document.querySelector('form#search-form, form');
+                            if (form) {
+                                if (typeof form.requestSubmit === 'function') form.requestSubmit();
+                                else form.submit();
                             }
+                            var searchBtn = document.querySelector('#search-icon-legacy, button#search-button, button.search-button, [aria-label="Search"]');
+                            if (searchBtn && typeof searchBtn.click === 'function') searchBtn.click();
+                            var ev = new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true});
+                            target.dispatchEvent(ev);
                             target.blur();
                             return;
                         } else if (key === '.com') { target.value += '.com'; }
@@ -720,25 +725,45 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 if (currentTargetInput) currentTargetInput.blur();
             });
             
+            function findInputTarget(node) {
+                if (!node) return null;
+                if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.isContentEditable) return node;
+                var closest = node.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], #search, #search-input, ytd-searchbox, form#search-form, [aria-label*="Search" i], [placeholder*="Search" i]');
+                if (closest) {
+                    return (closest.tagName === 'INPUT' || closest.tagName === 'TEXTAREA') ? closest : (closest.querySelector('input, textarea') || closest);
+                }
+                return node.querySelector ? node.querySelector('input, textarea') : null;
+            }
+
             function showKeyboardFor(el) {
-                if (!el) return;
-                var isInput = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox' || el.getAttribute('role') === 'combobox';
-                if (isInput) {
-                    currentTargetInput = el;
+                var target = findInputTarget(el);
+                if (target) {
+                    currentTargetInput = target;
+                    target.setAttribute('inputmode', 'none');
                     kb.classList.add('visible');
                 }
             }
             
             document.addEventListener('focusin', function(e) { showKeyboardFor(e.target); }, true);
             document.addEventListener('click', function(e) {
-                var el = e.target.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], #search-bar');
-                if (el) {
-                    showKeyboardFor(el);
-                } else if (!e.target.closest('#vr-air-keyboard')) {
-                    // Clicked outside on page content — close keyboard
+                if (e.target.closest('#vr-air-keyboard')) return;
+                var input = findInputTarget(e.target);
+                if (input) {
+                    showKeyboardFor(input);
+                } else {
                     kb.classList.remove('visible');
                 }
             }, true);
+            
+            // Continuous polling for active input focus (handles dynamically loaded search boxes)
+            setInterval(function() {
+                var active = document.activeElement;
+                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable) && !active.closest('#vr-air-keyboard')) {
+                    currentTargetInput = active;
+                    active.setAttribute('inputmode', 'none');
+                    kb.classList.add('visible');
+                }
+            }, 300);
         })();
         """
     }
