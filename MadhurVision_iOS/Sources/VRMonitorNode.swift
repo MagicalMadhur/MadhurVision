@@ -473,6 +473,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             dock.id = 'vr-floating-dock';
             dock.innerHTML = `
                 <div class="vfd-btn" id="vfd-home" title="OS Home">🏠</div>
+                <div class="vfd-btn" id="vfd-keyboard" title="Air Keyboard" style="background:rgba(0,212,255,0.2);border-color:#00d4ff;">⌨️</div>
                 <div class="vfd-btn" id="vfd-back" title="Back">◀</div>
                 <div class="vfd-btn" id="vfd-fwd" title="Forward">▶</div>
                 <div class="vfd-btn" id="vfd-reload" title="Refresh">↻</div>
@@ -519,6 +520,13 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             document.getElementById('vfd-home').addEventListener('click', function(e) {
                 e.stopPropagation();
                 window.webkit.messageHandlers.vrOS.postMessage({action:'goHome'});
+            });
+            document.getElementById('vfd-keyboard').addEventListener('click', function(e) {
+                e.stopPropagation();
+                var kb = document.getElementById('vr-air-keyboard');
+                if (kb) {
+                    kb.classList.toggle('visible');
+                }
             });
             document.getElementById('vfd-back').addEventListener('click', function(e) {
                 e.stopPropagation();

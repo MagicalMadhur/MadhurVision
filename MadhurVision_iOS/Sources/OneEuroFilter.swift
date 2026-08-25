@@ -2,10 +2,10 @@ import Foundation
 import CoreGraphics
 import simd
 
-/// High-Performance 1€ (One-Euro) Filter with Adaptive Deadband Hover Lock for VR/AR motion tracking.
+/// High-Performance 1€ (One-Euro) Filter for VR/AR motion tracking (INRIA formulation).
 /// Dynamically adjusts cutoff frequency based on movement speed:
-/// - Low speed / hovering: low cutoff + deadband lock -> 100% elimination of micro-tremors and tracking noise.
-/// - High speed / moving: high cutoff -> 0ms latency with zero lag.
+/// - Low speed: low cutoff -> 100% elimination of micro-tremors and tracking noise.
+/// - High speed: high cutoff -> 0ms latency with zero lag.
 public final class OneEuroFilter1D {
     private var minCutoff: Double // Minimum cutoff frequency (Hz)
     private var beta: Double      // Speed coefficient
@@ -15,7 +15,7 @@ public final class OneEuroFilter1D {
     private var dxPrev: Double = 0.0
     private var tPrev: TimeInterval? = nil
     
-    public init(minCutoff: Double = 0.9, beta: Double = 0.008, dCutoff: Double = 1.0) {
+    public init(minCutoff: Double = 1.0, beta: Double = 0.04, dCutoff: Double = 1.0) {
         self.minCutoff = minCutoff
         self.beta = beta
         self.dCutoff = dCutoff
@@ -43,7 +43,7 @@ public final class OneEuroFilter1D {
         let aD = alpha(rate: rate, cutoff: dCutoff)
         let dxHat = aD * dx + (1.0 - aD) * dxPrev
         
-        // 2. Adaptive cutoff based on speed
+        // 2. Adaptive cutoff based on speed (opens up instantly on movement)
         let cutoff = minCutoff + beta * abs(dxHat)
         let a = alpha(rate: rate, cutoff: cutoff)
         
@@ -64,47 +64,24 @@ public final class OneEuroFilter1D {
     }
 }
 
-/// 2D One-Euro Filter with Adaptive Deadband Hover Lock for VR/AR motion tracking
+/// 2D One-Euro Filter for screen & camera coordinates
 public final class OneEuroFilter2D {
     private let filterX: OneEuroFilter1D
     private let filterY: OneEuroFilter1D
-    private var lastLockedPoint: CGPoint? = nil
-    private let deadbandRadius: Double
     
-    public init(minCutoff: Double = 0.9, beta: Double = 0.008, dCutoff: Double = 1.0, deadbandRadius: Double = 0.004) {
+    public init(minCutoff: Double = 1.0, beta: Double = 0.04, dCutoff: Double = 1.0) {
         self.filterX = OneEuroFilter1D(minCutoff: minCutoff, beta: beta, dCutoff: dCutoff)
         self.filterY = OneEuroFilter1D(minCutoff: minCutoff, beta: beta, dCutoff: dCutoff)
-        self.deadbandRadius = deadbandRadius
     }
     
     public func filter(point: CGPoint, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) -> CGPoint {
-        let rawFilteredX = filterX.filter(x: Double(point.x), timestamp: timestamp)
-        let rawFilteredY = filterY.filter(x: Double(point.y), timestamp: timestamp)
-        let filtered = CGPoint(x: rawFilteredX, y: rawFilteredY)
-        
-        guard let locked = lastLockedPoint else {
-            lastLockedPoint = filtered
-            return filtered
-        }
-        
-        let dist = hypot(Double(filtered.x - locked.x), Double(filtered.y - locked.y))
-        if dist < deadbandRadius {
-            // Hand is hovering / resting: lock position 100% motionless (zero jitter)
-            return locked
-        } else {
-            // Hand is deliberately moving: update locked point smoothly
-            let progress = min(1.0, (dist - deadbandRadius) / 0.02)
-            let smoothedX = locked.x + (filtered.x - locked.x) * CGFloat(progress)
-            let smoothedY = locked.y + (filtered.y - locked.y) * CGFloat(progress)
-            let result = CGPoint(x: smoothedX, y: smoothedY)
-            lastLockedPoint = result
-            return result
-        }
+        let x = filterX.filter(x: Double(point.x), timestamp: timestamp)
+        let y = filterY.filter(x: Double(point.y), timestamp: timestamp)
+        return CGPoint(x: x, y: y)
     }
     
     public func reset() {
         filterX.reset()
         filterY.reset()
-        lastLockedPoint = nil
     }
 }

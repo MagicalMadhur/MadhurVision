@@ -274,17 +274,14 @@ class HandTrackingManager: NSObject {
             extendedPointing = indexPos
         }
         
-        let filteredPointing = oneEuroFilter.filter(point: extendedPointing)
-
         // Freeze cursor on click so it never drifts
         let cursorPosition: CGPoint
         if pinchCooldown {
             cursorPosition = lastGoodCursorPosition
         } else if isPointing {
-            lastGoodCursorPosition = filteredPointing
-            cursorPosition = filteredPointing
+            lastGoodCursorPosition = indexPos
+            cursorPosition = indexPos
         } else {
-            oneEuroFilter.reset()
             cursorPosition = .zero
         }
 

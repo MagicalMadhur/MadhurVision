@@ -138,11 +138,11 @@ class HandCursorNode: SCNNode {
         let ndcY = -Float(pos.y * 2.0 - 1.0) // Invert Y
 
         // 1. Stable Hand Origin in 3D Camera Space (anchored in front of user's chest/hand)
-        let localHandPos = SCNVector3(ndcX * 0.14 + 0.05, ndcY * 0.14 - 0.18, -0.38)
+        let localHandPos = SCNVector3(ndcX * 0.15 + 0.05, ndcY * 0.15 - 0.18, -0.38)
         let worldHandPos = cameraNode.convertPosition(localHandPos, to: nil)
 
         // 2. 1:1 Natural Ray Direction pointing directly into the VR monitor plane
-        let localTargetPos = SCNVector3(ndcX * 1.15, ndcY * 0.90, -2.1)
+        let localTargetPos = SCNVector3(ndcX * 1.35, ndcY * 1.05, -2.0)
         let worldTargetPos = cameraNode.convertPosition(localTargetPos, to: nil)
 
         // Segment endpoints
