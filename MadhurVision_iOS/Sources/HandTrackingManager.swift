@@ -193,19 +193,20 @@ class HandTrackingManager: NSObject {
         let thumbPos = thumbTip.map { CGPoint(x: $0.location.x, y: 1.0 - $0.location.y) } ?? .zero
         let middlePos = middleTip.map { CGPoint(x: $0.location.x, y: 1.0 - $0.location.y) } ?? .zero
 
-        func distance(_ first: VNRecognizedPoint, _ second: VNRecognizedPoint) -> CGFloat {
-            hypot(first.location.x - second.location.x, first.location.y - second.location.y)
+        func distance(_ first: VNRecognizedPoint?, _ second: VNRecognizedPoint?) -> CGFloat {
+            guard let first = first, let second = second else { return 999.0 }
+            return hypot(first.location.x - second.location.x, first.location.y - second.location.y)
         }
 
         // Finger extension is measured relative to the wrist instead of using
         // only vertical screen coordinates.
-        func isExtended(_ tip: VNRecognizedPoint, _ knuckle: VNRecognizedPoint) -> Bool {
-            guard tip.confidence > 0.25, knuckle.confidence > 0.20 else { return false }
+        func isExtended(_ tip: VNRecognizedPoint?, _ knuckle: VNRecognizedPoint?) -> Bool {
+            guard let tip = tip, let knuckle = knuckle, tip.confidence > 0.20, knuckle.confidence > 0.15 else { return false }
             return distance(tip, wrist) > distance(knuckle, wrist) * 1.15
         }
 
-        func isCurled(_ tip: VNRecognizedPoint, _ knuckle: VNRecognizedPoint) -> Bool {
-            guard tip.confidence > 0.25, knuckle.confidence > 0.20 else { return false }
+        func isCurled(_ tip: VNRecognizedPoint?, _ knuckle: VNRecognizedPoint?) -> Bool {
+            guard let tip = tip, let knuckle = knuckle, tip.confidence > 0.20, knuckle.confidence > 0.15 else { return false }
             return distance(tip, wrist) <= distance(knuckle, wrist) * 1.15
         }
 
@@ -217,13 +218,18 @@ class HandTrackingManager: NSObject {
         let littleCurled: Bool
         let thumbFolded: Bool
         let thumbExtended: Bool
-        if let littleTip, let littleMCP {
+
+        if let littleTip = littleTip, let littleMCP = littleMCP {
             littleCurled = isCurled(littleTip, littleMCP)
-            let palmWidth = max(distance(indexMCP, littleMCP), 0.01)
+        } else {
+            littleCurled = false
+        }
+
+        if let thumbTip = thumbTip {
+            let palmWidth = max(distance(indexMCP, littleMCP ?? indexMCP), 0.01)
             thumbFolded = distance(thumbTip, indexMCP) <= palmWidth * 1.5
             thumbExtended = distance(thumbTip, wrist) > palmWidth * 1.2
         } else {
-            littleCurled = false
             thumbFolded = false
             thumbExtended = false
         }
