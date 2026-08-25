@@ -520,6 +520,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     
     // MARK: - Air Keyboard JS
     
+    // MARK: - Air Keyboard JS (Universal on all websites & apps)
+    
     private static func airKeyboardJS() -> String {
         return """
         (function() {
@@ -529,54 +531,87 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             style.textContent = `
                 #vr-air-keyboard {
                     position: fixed;
-                    bottom: -60%;
+                    bottom: -70%;
                     left: 50%;
                     transform: translateX(-50%);
-                    width: 90%;
-                    max-width: 960px;
-                    background: rgba(14, 20, 32, 0.96);
-                    border: 1px solid rgba(0, 212, 255, 0.3);
+                    width: 92%;
+                    max-width: 980px;
+                    background: rgba(10, 16, 28, 0.97);
+                    border: 2px solid rgba(0, 212, 255, 0.4);
                     border-radius: 20px 20px 0 0;
-                    padding: 16px;
+                    padding: 14px 18px 20px;
                     display: flex;
                     flex-direction: column;
                     gap: 8px;
-                    z-index: 2147483646;
-                    transition: bottom 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-                    box-shadow: 0 -10px 50px rgba(0,0,0,0.8);
+                    z-index: 2147483647;
+                    transition: bottom 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+                    box-shadow: 0 -15px 60px rgba(0,0,0,0.9), 0 0 30px rgba(0,212,255,0.2);
+                    backdrop-filter: blur(20px);
+                    -webkit-backdrop-filter: blur(20px);
                 }
-                #vr-air-keyboard.visible { bottom: 0; }
-                .kb-row { display:flex; justify-content:center; gap:6px; }
+                #vr-air-keyboard.visible { bottom: 0 !important; }
+                .kb-topbar {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 0 4px 6px;
+                    border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+                    margin-bottom: 4px;
+                }
+                .kb-title { font-size: 13px; font-weight: 700; color: #00d4ff; letter-spacing: 1px; text-transform: uppercase; font-family: -apple-system, sans-serif; }
+                .kb-close-btn {
+                    background: rgba(255,255,255,0.12);
+                    border: 1px solid rgba(255,255,255,0.2);
+                    color: #fff;
+                    font-size: 13px;
+                    font-weight: 600;
+                    padding: 4px 14px;
+                    border-radius: 20px;
+                    cursor: pointer;
+                    font-family: -apple-system, sans-serif;
+                }
+                .kb-close-btn:active { background: #ff0055; }
+                .kb-row { display: flex; justify-content: center; gap: 6px; }
                 .kb-key {
-                    background: rgba(255,255,255,0.1);
-                    border: 1px solid rgba(255,255,255,0.15);
+                    background: rgba(255,255,255,0.12);
+                    border: 1px solid rgba(255,255,255,0.18);
                     color: white;
                     font-size: 18px;
-                    font-family: -apple-system, sans-serif;
-                    font-weight: 500;
-                    padding: 12px 0;
+                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                    font-weight: 600;
+                    padding: 11px 0;
                     flex: 1;
                     border-radius: 8px;
                     text-align: center;
                     cursor: pointer;
                     user-select: none;
+                    -webkit-user-select: none;
+                    transition: transform 0.1s, background 0.1s;
                 }
-                .kb-key:active { background: rgba(0,212,255,0.4); transform: scale(0.95); }
-                .kb-key.wide { flex: 1.6; background: rgba(0,212,255,0.15); }
-                .kb-key.space { flex: 5.5; }
+                .kb-key:active { background: rgba(0,212,255,0.5); transform: scale(0.92); }
+                .kb-key.action { background: rgba(0,212,255,0.22); border-color: rgba(0,212,255,0.4); color: #00d4ff; }
+                .kb-key.wide { flex: 1.6; }
+                .kb-key.space { flex: 5.2; }
             `;
             document.head.appendChild(style);
             
             var kb = document.createElement('div');
             kb.id = 'vr-air-keyboard';
             
+            var topBar = document.createElement('div');
+            topBar.className = 'kb-topbar';
+            topBar.innerHTML = '<span class="kb-title">⌨️ VR Air Keyboard</span><button class="kb-close-btn" id="kb-close-action">✕ Done</button>';
+            kb.appendChild(topBar);
+            
             var layout = [
                 ['1','2','3','4','5','6','7','8','9','0'],
                 ['Q','W','E','R','T','Y','U','I','O','P'],
                 ['A','S','D','F','G','H','J','K','L'],
                 ['Z','X','C','V','B','N','M','DEL'],
-                ['https://','@','.com','SPACE','.','GO']
+                ['https://','@','.com','SPACE','.','↵ GO']
             ];
+            
+            var currentTargetInput = null;
             
             layout.forEach(function(row) {
                 var rowDiv = document.createElement('div');
@@ -585,8 +620,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     var btn = document.createElement('div');
                     btn.className = 'kb-key';
                     if (key === 'SPACE') { btn.classList.add('space'); btn.textContent = 'Space'; }
-                    else if (key === 'DEL') { btn.classList.add('wide'); btn.textContent = '⌫'; }
-                    else if (key === 'GO') { btn.classList.add('wide'); btn.textContent = '↵ Search'; }
+                    else if (key === 'DEL') { btn.classList.add('wide', 'action'); btn.textContent = '⌫'; }
+                    else if (key === '↵ GO') { btn.classList.add('wide', 'action'); btn.textContent = '↵ Search'; }
                     else if (key === '.com') { btn.classList.add('wide'); btn.textContent = '.com'; }
                     else if (key === 'https://') { btn.classList.add('wide'); btn.textContent = 'https://'; }
                     else { btn.textContent = key; }
@@ -595,26 +630,48 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     btn.addEventListener('click', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
-                        var el = document.activeElement;
-                        if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return;
-                        if (key === 'DEL') { el.value = el.value.slice(0, -1); }
-                        else if (key === 'SPACE') { el.value += ' '; }
-                        else if (key === 'GO') {
-                            if (el.form) { el.form.submit(); }
-                            else {
-                                var ev = new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true});
-                                el.dispatchEvent(ev);
+                        
+                        var target = currentTargetInput || document.activeElement;
+                        if (!target) return;
+                        
+                        if (target.isContentEditable) {
+                            if (key === 'DEL') {
+                                document.execCommand('delete', false, null);
+                            } else if (key === 'SPACE') {
+                                document.execCommand('insertText', false, ' ');
+                            } else if (key === '↵ GO') {
+                                kb.classList.remove('visible');
+                                return;
+                            } else {
+                                var txt = (key === 'https://' || key === '.com' || key === '@' || key === '.') ? key : key.toLowerCase();
+                                document.execCommand('insertText', false, txt);
                             }
-                            el.blur();
                             return;
                         }
-                        else if (key === '.com') { el.value += '.com'; }
-                        else if (key === 'https://') { el.value += 'https://'; }
-                        else if (key === '@') { el.value += '@'; }
-                        else if (key === '.') { el.value += '.'; }
-                        else { el.value += key.toLowerCase(); }
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') return;
+                        
+                        if (key === 'DEL') {
+                            target.value = target.value.slice(0, -1);
+                        } else if (key === 'SPACE') {
+                            target.value += ' ';
+                        } else if (key === '↵ GO') {
+                            kb.classList.remove('visible');
+                            if (target.form) { target.form.submit(); }
+                            else {
+                                var ev = new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true});
+                                target.dispatchEvent(ev);
+                            }
+                            target.blur();
+                            return;
+                        } else if (key === '.com') { target.value += '.com'; }
+                        else if (key === 'https://') { target.value += 'https://'; }
+                        else if (key === '@') { target.value += '@'; }
+                        else if (key === '.') { target.value += '.'; }
+                        else { target.value += key.toLowerCase(); }
+                        
+                        target.dispatchEvent(new Event('input', { bubbles: true }));
+                        target.dispatchEvent(new Event('change', { bubbles: true }));
                     });
                     rowDiv.appendChild(btn);
                 });
@@ -622,19 +679,33 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             });
             
             document.body.appendChild(kb);
-            kb.addEventListener('mousedown', function(e) { e.preventDefault(); });
             
-            document.addEventListener('focusin', function(e) {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-                    document.getElementById('vr-air-keyboard').classList.add('visible');
+            document.getElementById('kb-close-action').addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                kb.classList.remove('visible');
+                if (currentTargetInput) currentTargetInput.blur();
+            });
+            
+            function showKeyboardFor(el) {
+                if (!el) return;
+                var isInput = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox' || el.getAttribute('role') === 'combobox';
+                if (isInput) {
+                    currentTargetInput = el;
+                    kb.classList.add('visible');
                 }
-            });
-            document.addEventListener('focusout', function(e) {
-                setTimeout(function() {
-                    var kb = document.getElementById('vr-air-keyboard');
-                    if (kb) kb.classList.remove('visible');
-                }, 250);
-            });
+            }
+            
+            document.addEventListener('focusin', function(e) { showKeyboardFor(e.target); }, true);
+            document.addEventListener('click', function(e) {
+                var el = e.target.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], #search-bar');
+                if (el) {
+                    showKeyboardFor(el);
+                } else if (!e.target.closest('#vr-air-keyboard')) {
+                    // Clicked outside on page content — close keyboard
+                    kb.classList.remove('visible');
+                }
+            }, true);
         })();
         """
     }

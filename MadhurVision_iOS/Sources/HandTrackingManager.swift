@@ -245,11 +245,10 @@ class HandTrackingManager: NSObject {
         let isPointing = (indexExtended && middleCurled && !isFist && !isTwoFingerScroll) || pinchCooldown
 
         // CLICK GESTURE (active only during Pointing):
-        // 1. Thumb touches Middle finger (best: index finger stays perfectly locked on target)
-        // 2. OR Thumb pinches Index finger
+        // Requires extreme closeness / true touching (distance < 0.038) to prevent false clicks with light gaps
         let thumbMiddleDist = hypot(thumbPos.x - middlePos.x, thumbPos.y - middlePos.y)
         let thumbIndexDist  = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
-        let clickDetected   = isPointing && !pinchCooldown && (thumbMiddleDist < 0.065 || thumbIndexDist < 0.055)
+        let clickDetected   = isPointing && !pinchCooldown && (thumbMiddleDist < 0.038 || thumbIndexDist < 0.035)
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
         let palmSpan = distance(indexMCP, wrist)

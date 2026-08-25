@@ -36,6 +36,7 @@ class HandCursorNode: SCNNode {
     private func setupLaserBeam() {
         laserCylinder.radialSegmentCount = 12
         laserCylinder.heightSegmentCount = 1
+        laserCylinder.height = 1.0
         
         laserMaterial.diffuse.contents = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.85)
         laserMaterial.emission.contents = UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0)
@@ -47,6 +48,8 @@ class HandCursorNode: SCNNode {
         laserCylinder.materials = [laserMaterial]
 
         laserNode.geometry = laserCylinder
+        // Pivot at bottom base (y = -0.5) so scaling height scales forward along ray
+        laserNode.pivot = SCNMatrix4MakeTranslation(0, -0.5, 0)
         laserNode.isHidden = true
         addChildNode(laserNode)
     }
@@ -127,11 +130,11 @@ class HandCursorNode: SCNNode {
             return
         }
 
-        // Responsive low-pass filter (alpha = 0.22)
+        // Responsive low-pass filter (alpha = 0.28 for crisp hand tracing)
         if smoothedFingerPos == nil {
             smoothedFingerPos = fingerPos
         } else {
-            let alpha: CGFloat = 0.22
+            let alpha: CGFloat = 0.28
             let current = smoothedFingerPos!
             smoothedFingerPos = CGPoint(
                 x: current.x + (fingerPos.x - current.x) * alpha,
@@ -140,17 +143,17 @@ class HandCursorNode: SCNNode {
         }
         let pos = smoothedFingerPos!
 
-        // Map 2D camera coordinates with 2.5x sensitivity boost
-        let sensitivity: Float = 2.5
+        // Map 2D camera coordinates with 2.4x sensitivity boost
+        let sensitivity: Float = 2.4
         let ndcX = Float(pos.x * 2.0 - 1.0) * sensitivity
         let ndcY = -Float(pos.y * 2.0 - 1.0) * sensitivity // Invert Y
 
-        // 1. Compute Hand Origin in 3D Camera Space (anchored forward and slightly lower like a natural holding hand)
-        let localHandPos = SCNVector3(ndcX * 0.35 + 0.08, ndcY * 0.35 - 0.16, -0.38)
+        // 1. Stable Hand Origin in 3D Camera Space (anchored in front of user's chest/hand)
+        let localHandPos = SCNVector3(ndcX * 0.15 + 0.06, ndcY * 0.15 - 0.16, -0.36)
         let worldHandPos = cameraNode.convertPosition(localHandPos, to: nil)
 
-        // 2. Compute Ray Target Direction (pointing into 3D VR space)
-        let localTargetPos = SCNVector3(ndcX * 1.6, ndcY * 1.6, -3.5)
+        // 2. Ray Target Direction (pointing into 3D VR space at distance)
+        let localTargetPos = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.2)
         let worldTargetPos = cameraNode.convertPosition(localTargetPos, to: nil)
 
         // Segment endpoints
@@ -199,7 +202,7 @@ class HandCursorNode: SCNNode {
         previousIsPinching = isPinching
     }
 
-    // MARK: - 3D Laser Beam Alignment
+    // MARK: - 3D Laser Beam Alignment (Zero-Allocation GPU Matrix Transform)
 
     private func positionLaserBeam(from start: SCNVector3, to end: SCNVector3) {
         laserNode.isHidden = false
@@ -209,19 +212,18 @@ class HandCursorNode: SCNNode {
         let delta = p2 - p1
         let distance = simd_length(delta)
 
-        guard distance > 0.01 else {
+        guard distance > 0.02 else {
             laserNode.isHidden = true
             return
         }
 
-        // 1. Update cylinder length
-        laserCylinder.height = CGFloat(distance)
+        // 1. Position laser at start (hand anchor)
+        laserNode.simdPosition = p1
 
-        // 2. Position cylinder at midpoint
-        let mid = (p1 + p2) * 0.5
-        laserNode.simdPosition = mid
+        // 2. Scale height by distance (pivot is at base y = -0.5)
+        laserNode.simdScale = simd_float3(1.0, distance, 1.0)
 
-        // 3. Rotate cylinder (default axis is Y) to point along delta
+        // 3. Orient towards delta vector
         let dir = simd_normalize(delta)
         let yAxis = simd_float3(0, 1, 0)
         let quat = simd_quatf(from: yAxis, to: dir)
