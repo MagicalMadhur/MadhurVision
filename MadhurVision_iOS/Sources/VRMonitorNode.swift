@@ -1184,6 +1184,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 color: rgba(255,255,255,0.5);
                 margin-top: 4px;
             }
+        </style>
         </head>
         <body>
         
