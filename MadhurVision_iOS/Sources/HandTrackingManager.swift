@@ -242,18 +242,19 @@ class HandTrackingManager: NSObject {
         // GESTURE 3: Two-Finger Scroll ✌️ (Index + Middle extended)
         let isTwoFingerScroll = indexExtended && middleExtended && !isFist && !isOpenPalm
 
-        // GESTURE 4: Single-Finger Point 👆 (Index extended, not scrolling, not fist, not open palm)
-        let isPointing = (indexExtended && !isTwoFingerScroll && !isFist && !isOpenPalm) || pinchCooldown
-
-        // CLICK GESTURE (active only during Pointing):
-        // Uses Index Tip + Thumb Tip physical pinch (distance < 0.034).
-        // Middle finger distance is omitted to prevent false clicks when hand is angled/sideways.
+        // PINCH / CLICK GESTURE (Index Tip + Thumb Tip touch distance)
         let thumbIndexDist = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
-        let pinchContact = thumbTip != nil && thumbIndexDist < 0.034
-        if !pinchContact && thumbIndexDist > 0.055 {
+        let isPinchingFingers = (thumbTip != nil) && (thumbIndexDist < 0.045)
+        
+        // Hysteresis: Must release fingers to > 0.060 to unlock next click
+        if !isPinchingFingers && thumbIndexDist > 0.060 {
             pinchReleased = true
         }
-        let clickDetected = isPointing && pinchContact && pinchReleased && !pinchCooldown && !isFist
+
+        // GESTURE 4: Single-Finger Point 👆 (Active whenever not fist, not scroll, not open palm)
+        let isPointing = (!isTwoFingerScroll && !isFist && !isOpenPalm) || isPinchingFingers || pinchCooldown
+        
+        let clickDetected = isPointing && isPinchingFingers && pinchReleased && !pinchCooldown && !isFist
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
         let indexMCPPos = CGPoint(x: indexMCP.location.x, y: 1.0 - indexMCP.location.y)
