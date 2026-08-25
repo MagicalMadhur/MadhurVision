@@ -90,6 +90,9 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         let webConfig = WKWebViewConfiguration()
         webConfig.allowsInlineMediaPlayback = true
         webConfig.mediaTypesRequiringUserActionForPlayback = []
+        webConfig.allowsAirPlayForMediaPlayback = true
+        webConfig.allowsPictureInPictureMediaPlayback = true
+        webConfig.defaultWebpagePreferences.allowsContentJavaScript = true
         
         // Swift <-> JS Bridge
         webConfig.userContentController.add(self, name: "vrOS")
@@ -109,6 +112,14 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             forMainFrameOnly: true
         )
         webConfig.userContentController.addUserScript(keyboardScript)
+
+        // Video Auto-Play & In-line Playback script
+        let videoScript = WKUserScript(
+            source: VRMonitorNode.videoPlaybackHelperJS(),
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: false
+        )
+        webConfig.userContentController.addUserScript(videoScript)
         
         webView = WKWebView(
             frame: CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight),
@@ -118,8 +129,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         webView.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
         webView.navigationDelegate = self
         
-        // iPad Desktop Safari User Agent for standard desktop sites
-        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+        // Desktop Mac Safari User Agent (serves full desktop HTML5 video with direct playback)
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
         
         // Load OS HTML
         let osHTML = VRMonitorNode.generateOSHTML()
@@ -531,8 +542,45 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         })();
         """
     }
+
+    // MARK: - Video Playback Enforcer JS
     
-    // MARK: - Air Keyboard JS
+    private static func videoPlaybackHelperJS() -> String {
+        return """
+        (function() {
+            function unlockAllVideos() {
+                var videos = document.querySelectorAll('video');
+                videos.forEach(function(v) {
+                    v.setAttribute('playsinline', 'true');
+                    v.setAttribute('webkit-playsinline', 'true');
+                    // On YouTube watch page, trigger playback if paused
+                    if (v.paused && (window.location.hostname.indexOf('youtube.com') !== -1 || window.location.pathname.indexOf('watch') !== -1)) {
+                        v.play().catch(function(){});
+                    }
+                });
+            }
+            setInterval(unlockAllVideos, 600);
+            
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(function() {
+                    var playBtn = document.querySelector('.ytp-play-button, .ytp-large-play-button');
+                    if (playBtn) playBtn.click();
+                }, 800);
+            });
+            
+            document.addEventListener('click', function() {
+                setTimeout(function() {
+                    var v = document.querySelector('video');
+                    if (v && v.paused) {
+                        v.play().catch(function(){});
+                    }
+                    var playBtn = document.querySelector('.ytp-play-button, .ytp-large-play-button');
+                    if (playBtn) playBtn.click();
+                }, 300);
+            }, true);
+        })();
+        """
+    }
     
     // MARK: - Air Keyboard JS (Universal on all websites & apps)
     
