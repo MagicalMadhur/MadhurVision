@@ -166,9 +166,105 @@ The software architecture of the standalone headset is built on an open-source, 
 ```
 
 ### 4.1 Why Android Open Source Project (AOSP)?
-1. **Hardware Driver Ecosystem**: All top XR chipsets (Snapdragon XR2, MediaTek Dimensity, Rockchip RK3588) provide turnkey Linux/Android BSPs (Board Support Packages) with direct GPU/NPU drivers.
-2. **App Compatibility**: Standard Android 2D applications (YouTube, Chrome, Netflix, Office, Discord) run out-of-the-box as spatial floating windows inside the 3D compositor.
-3. **OpenXR Compliance**: AOSP easily hosts a native OpenXR runtime written in C++/Vulkan, allowing developers to port Unity, Unreal Engine, and WebXR applications seamlessly.
+1. **Turnkey Hardware Driver Ecosystem**: All top XR silicon vendors (Qualcomm Snapdragon XR2, MediaTek Dimensity, Rockchip RK3588) provide turnkey Linux/Android BSPs (Board Support Packages) with direct GPU/NPU hardware drivers.
+2. **Universal App Compatibility**: Standard Android 2D applications (YouTube, Chrome, Netflix, Spotify, Office, Discord) run out-of-the-box as spatial floating windows inside our 3D compositor with **zero app modifications required**.
+3. **OpenXR Compliance**: AOSP easily hosts a native OpenXR runtime written in C++/Vulkan, allowing developers to build 3D VR/MR applications with Unity, Unreal Engine, and WebXR.
+
+---
+
+### 4.2 The 4 Core Engineering Pillars of MadhurVision Spatial OS
+
+To transform standard AOSP into a Spatial Operating System, we replace Android's flat 2D window manager with four dedicated subsystems:
+
+```
++─────────────────────────────────────────────────────────────────────────────+
+|                     PILLAR 1: SPATIAL WINDOW COMPOSITOR                     |
+|                                                                             |
+|  [ 2D Android APKs ] ──> [ Virtual SurfaceTexture ] ──> [ Vulkan 3D Quad ]  |
+|  (YouTube, Chrome)       (1920x1080 GPU Buffer)          (Floating in Space)|
++─────────────────────────────────────────────────────────────────────────────+
+                                       │
++─────────────────────────────────────────────────────────────────────────────+
+|                     PILLAR 2: REAL-TIME PASSTHROUGH SERVICE                 |
+|                                                                             |
+|  [ Camera Hardware ] ──> [ V4L2 / Camera HAL ] ──> [ Stereo 3D Background ] |
+|  (Dual MIPI-CSI)         (Zero-Copy DMA Buffer)      (Sub-12ms Real World)  |
++─────────────────────────────────────────────────────────────────────────────+
+                                       │
++─────────────────────────────────────────────────────────────────────────────+
+|                     PILLAR 3: SPATIAL INPUT DAEMON (madhurvision-inputd)    |
+|                                                                             |
+|  [ Hand Landmark AI ] ──> [ Raycast / Pinch ] ──> [ Native MotionEvent ]    |
+|  (21 3D Coordinates)      (1€ Filter Math)        (Injected into Android)   |
++─────────────────────────────────────────────────────────────────────────────+
+                                       │
++─────────────────────────────────────────────────────────────────────────────+
+|                     PILLAR 4: SPATIAL SYSTEM SHELL & UI                     |
+|                                                                             |
+|  - Floating Glassmorphic Sidebar Dock (Home, Apps, Settings, Recalibrate)   |
+|  - 3D Air Keyboard Input Method (IME) with haptic/audio feedback            |
+|  - Spatial Control Center (Volume, IPD, Brightness, Passthrough Toggle)     |
++─────────────────────────────────────────────────────────────────────────────+
+```
+
+#### Pillar 1: The Spatial Window Compositor (Replacing SurfaceFlinger)
+* **The Problem with Stock Android**: Standard Android's `SurfaceFlinger` takes 2D surfaces and composites them directly onto a flat display framebuffer.
+* **The MadhurVision Solution**:
+  1. We configure Android's `WindowManagerService` to treat each running application as a virtual display (`VirtualDisplay`) or offscreen buffer (`SurfaceTexture`).
+  2. The Spatial Compositor (written in C++ and Vulkan) allocates an `AHardwareBuffer` for each running app.
+  3. When an app draws a frame, Vulkan maps that buffer as a texture onto a 3D polygonal mesh (planar quad or curved cylinder) positioned at arbitrary 6DoF coordinates $(x, y, z, \text{yaw}, \text{pitch}, \text{roll})$ in the user's room.
+  4. Multiple apps can be opened simultaneously, resized, repositioned, and pinned in physical space around the user.
+
+#### Pillar 2: The Real-Time Camera Passthrough System Service
+* Rather than treating the camera as an application, it runs as a low-level **System Compositor Layer**.
+* The dual camera feed is decoded via hardware ISP and directly bound to the background layer of the Vulkan rendering pipeline using `GL_TEXTURE_EXTERNAL_OES` or Vulkan external memory extensions.
+* When the user turns their head, **Late-Stage Asynchronous Reprojection** warps the camera background and virtual windows together, guaranteeing zero motion sickness.
+
+#### Pillar 3: Spatial Input Daemon (`madhurvision-inputd`)
+* Runs as a native background Linux service with high priority.
+* Captures camera frames, executes lightweight MediaPipe / TFLite models on the on-device NPU, and computes 3D hand landmarks.
+* Translates hand gestures into standard Linux input events via `/dev/uinput` or Android `InputManager`:
+  - **Single Finger Pointing**: Controls the system cursor hover state.
+  - **Index-Thumb Pinch**: Injects `MotionEvent.ACTION_DOWN` (touch down) and `ACTION_UP` (touch up).
+  - **Two-Finger Scroll**: Injects `MotionEvent.ACTION_SCROLL` / `AXIS_VSCROLL`.
+  - **Fist Grab**: Translates the entire 3D window along the ray axis.
+* **Result**: Any unmodified APK (YouTube, Netflix, Chrome) responds to air gestures as if the user were physically touching a giant tablet!
+
+#### Pillar 4: Spatial System Shell & UI
+* **Floating Glassmorphic Dock**: Quick access to Home, YouTube Cinema, Browser, and Settings.
+* **Universal Air Keyboard (Spatial IME)**: Floating virtual keyboard that automatically appears whenever any text field receives focus across any application.
+* **Control Center**: Fast sliders for IPD calibration (55–75mm), virtual screen distance (0.6m–4.5m), and passthrough opacity.
+
+---
+
+### 4.3 Pure Software Development & Simulation Strategy (Zero Hardware Required)
+
+We can build and validate 100% of this Spatial Operating System today without custom headset hardware using three development tiers:
+
+```
++─────────────────────────────────────────────────────────────────────────────+
+| TIER 1: PC ANDROID EMULATOR (AVD / x86_64 AOSP)                             |
+| - Run Custom AOSP Build on PC using Android Studio / QEMU                   |
+| - Simulate Stereo Camera Feeds using PC Webcam / Video Test Patterns        |
+| - Develop Spatial Compositor & Floating Window Management via Vulkan        |
++─────────────────────────────────────────────────────────────────────────────+
+                                       │
+                                       ▼
++─────────────────────────────────────────────────────────────────────────────+
+| TIER 2: STANDARD ANDROID PHONE / TABLET TESTBED                             |
+| - Deploy Custom Spatial Launcher & Compositor APK on any Android phone      |
+| - Use Phone's Rear Camera as the Live Passthrough Layer                     |
+| - Test Real-Time Hand Tracking & Gesture Injection using Phone NPU/GPU      |
++─────────────────────────────────────────────────────────────────────────────+
+                                       │
+                                       ▼
++─────────────────────────────────────────────────────────────────────────────+
+| TIER 3: SINGLE-BOARD COMPUTER (SBC) HARDWARE LAB (RK3588 / RPi 5)           |
+| - Flash Custom AOSP ROM to a low-cost ARM64 board ($80 - $130)              |
+| - Connect Dual MIPI-CSI Cameras and Test Direct Hardware Passthrough        |
+| - Verify OpenXR C++ Runtime and Multi-App Spatial Performance               |
++─────────────────────────────────────────────────────────────────────────────+
+```
 
 ---
 
