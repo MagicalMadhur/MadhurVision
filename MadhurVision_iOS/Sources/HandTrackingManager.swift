@@ -166,7 +166,6 @@ class HandTrackingManager: NSObject {
                     self.latestInput = .noHand
                 }
                 previousPalmY = nil
-                oneEuroFilter.reset()
             }
         }
     }
