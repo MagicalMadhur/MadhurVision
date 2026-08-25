@@ -94,13 +94,42 @@ To achieve a true standalone form-factor comparable to commercial spatial comput
 
 | Component | Target Specification | Role & Technical Justification |
 | :--- | :--- | :--- |
-| **Main SoC** | Qualcomm Snapdragon XR2 Gen 2 *(Alt: Rockchip RK3588S)* | Dedicated XR silicon with hardware tracking acceleration, low-latency camera-to-display engine (<12ms), and 32 TOPS NPU for AI models. |
+| **Main SoC** | Qualcomm Snapdragon XR2 Gen 2 *(Alt: Rockchip RK3588)* | Dedicated XR silicon with hardware tracking acceleration, low-latency camera-to-display engine (<12ms), and 32 TOPS NPU for AI models. |
 | **Displays** | Dual 2.56" Fast-LCD or 1.3" 4K Micro-OLED | 2160×2160 per eye (4K+ total), 90Hz/120Hz refresh, sub-1ms pixel response time to eliminate motion blur. |
 | **Optical System** | Folded 3-Element Pancake Lenses | Reduces headset depth from 120mm (Fresnel) down to 40mm, delivering edge-to-edge clarity and eliminating chromatic aberration. |
 | **Passthrough Cameras** | 2x High-Speed Color RGB (120 FPS, MIPI-CSI) | Positioned at physical human eye IPD (64mm separation) to provide realistic parallax depth without visual distortion. |
 | **Tracking Cameras** | 4x Global Shutter Monochrome Cameras | High-frequency SLAM head pose estimation and 3D hand tracking in all lighting conditions. |
 | **IMU** | Dual 6-Axis Bosch BMI270 (1000Hz) | Sub-millisecond sensor fusion for instant head rotation response. |
 | **Weight Balance** | 450g Total (50/50 Front-to-Back Distribution) | Battery mounted at the rear of the head strap to eliminate front-heavy neck strain. |
+
+---
+
+### 2.2 Open-Market Hardware Ecosystem (Building Real Hardware Without Enterprise Qualcomm NDAs)
+
+Because Qualcomm strictly restricts XR2 silicon to Tier-1 corporations with 10,000+ unit minimum order quantities (MOQs), independent developers can use top-tier open-market platforms available today:
+
+#### 👑 Platform 1: Rockchip RK3588 / RK3588S (The #1 Open-Market Recommendation)
+* **Available Boards**: **Orange Pi 5 Plus** ($95–$130), **Radxa Rock 5B** ($110–$140), **FriendlyELEC NanoPC-T6** ($120).
+* **Availability**: 100% open-market purchase on Amazon, AliExpress, DigiKey, and direct manufacturer stores with zero NDAs or restrictions.
+* **SoC Specs**:
+  - **CPU**: 8-Core (4x ARM Cortex-A76 @ 2.4GHz + 4x ARM Cortex-A55 @ 1.8GHz).
+  - **GPU**: ARM Mali-G610 MP4 (Full Vulkan 1.2, OpenGL ES 3.2, OpenCL 2.2).
+  - **AI NPU**: **6.0 TOPS Triple-Core Neural Engine** (Runs INT4/INT8/FP16 MediaPipe hand landmark models at 120+ FPS with sub-3ms latency via **RKNN-Toolkit2**).
+  - **Camera Inputs**: **Dual/Quad MIPI-CSI 4-Lane Ports** with built-in hardware 48MP ISP (supports dual Sony IMX586 / OV13855 120 FPS stereo passthrough).
+  - **Display Outputs**: **Dual MIPI-DSI (4K) + Dual HDMI 2.1 (8K@60Hz) + DisplayPort over USB-C**. Can drive two independent VR micro-displays at 90Hz/120Hz.
+  - **Operating System**: Official **AOSP Android 12/13/14 BSP** with open-source Linux kernel (v5.10 / v6.1) and full hardware HAL drivers.
+
+#### ⚡ Platform 2: Qualcomm Snapdragon Developer Kits (Thundercomm / Lantronix)
+* **Available Boards**: **Thundercomm TurboX C8550 Dev Kit** / **Radxa Dragon Q8**.
+* **Price**: ~$350 – $600.
+* **SoC**: Snapdragon 8 Gen 2 / 8 Gen 3 (the exact consumer equivalent to the Snapdragon XR2 Gen 2).
+* **Advantages**: Houses the Adreno 740/750 GPU and Hexagon NPU matching the Meta Quest 3 architecture.
+
+#### 🥽 Platform 3: Commercial Headset ADB / Developer Mode (Rapid Software Testing)
+* **Available Devices**: **Meta Quest 2 / Quest 3 / Pico 4** (Purchased used or new for $150–$350).
+* **Advantages**:
+  - With **Developer Mode enabled over ADB**, developers have deep access to install custom Android Spatial Launchers, custom background services, and native C++ OpenXR/Vulkan compositors.
+  - The complete optomechanical hardware (pancake lenses, high-resolution displays, battery strap, calibrated IMU, and 120 FPS cameras) is already integrated, allowing immediate testing of our **Custom Spatial OS, 3D Window Manager, Air Keyboard, and Floating Cinema Player** in physical VR.
 
 ---
 
