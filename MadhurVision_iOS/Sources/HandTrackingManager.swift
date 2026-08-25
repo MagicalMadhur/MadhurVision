@@ -212,9 +212,10 @@ class HandTrackingManager: NSObject {
             return distance(tip, wrist) <= distance(knuckle, wrist) * 1.15
         }
 
-        let indexExtended = isExtended(indexTip, indexMCP)
-        let middleCurled = isCurled(middleTip, middleMCP)
-        let ringCurled = isCurled(ringTip, ringMCP)
+        let indexExtended  = isExtended(indexTip, indexMCP)
+        let middleExtended = isExtended(middleTip, middleMCP)
+        let middleCurled   = isCurled(middleTip, middleMCP)
+        let ringCurled     = isCurled(ringTip, ringMCP)
         let littleCurled: Bool
         let thumbFolded: Bool
         let thumbExtended: Bool
@@ -229,32 +230,33 @@ class HandTrackingManager: NSObject {
             thumbExtended = false
         }
 
-        // A window grab needs a real closed fist.
+        // GESTURE 1: Grab (Closed Fist — all 4 curled + thumb folded)
         let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
 
-        // Index extension is the only requirement for pointing.
-        // During click cooldown, keep isPointing true so the cursor stays visible.
-        let isPointing = (indexExtended && !isFist) || pinchCooldown
-
-        // RESET GESTURE: Thumbs Up 👍 (thumb extended + all 4 fingers curled).
+        // GESTURE 2: Reset (Thumbs Up 👍 — thumb extended + all 4 curled)
         let isThumbsUp = thumbExtended && isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled
 
-        // CLICK GESTURE: 
-        // 1. Thumb touches MIDDLE finger (best: index finger stays pointed perfectly at target without moving)
-        // 2. OR classic pinch (thumb touches index finger)
+        // GESTURE 3: Two-Finger Scroll ✌️ (Index + Middle extended, Ring + Little curled)
+        // Moving hand vertically in this mode scrolls web pages with smooth momentum.
+        let isTwoFingerScroll = indexExtended && middleExtended && ringCurled && littleCurled && !isFist
+
+        // GESTURE 4: Single-Finger Point 👆 (Index extended, Middle curled or click cooldown)
+        // Laser pointer is active only in this mode, preventing accidental clicks while scrolling.
+        let isPointing = (indexExtended && middleCurled && !isFist && !isTwoFingerScroll) || pinchCooldown
+
+        // CLICK GESTURE (active only during Pointing):
+        // 1. Thumb touches Middle finger (best: index finger stays perfectly locked on target)
+        // 2. OR Thumb pinches Index finger
         let thumbMiddleDist = hypot(thumbPos.x - middlePos.x, thumbPos.y - middlePos.y)
-        let thumbIndexDist = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
-        let clickDetected = isPointing && !pinchCooldown && (thumbMiddleDist < 0.065 || thumbIndexDist < 0.055)
+        let thumbIndexDist  = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
+        let clickDetected   = isPointing && !pinchCooldown && (thumbMiddleDist < 0.065 || thumbIndexDist < 0.055)
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
         let palmSpan = distance(indexMCP, wrist)
 
-        // When pointing normally, continuously update lastGoodCursorPosition.
-        // When a click is detected, freeze at this position so the click
-        // lands exactly where the user was aiming.
+        // Freeze cursor on click so it never drifts
         let cursorPosition: CGPoint
         if pinchCooldown {
-            // During click cooldown, keep cursor frozen at last good position
             cursorPosition = lastGoodCursorPosition
         } else if isPointing {
             lastGoodCursorPosition = indexPos
@@ -263,13 +265,17 @@ class HandTrackingManager: NSObject {
             cursorPosition = .zero
         }
 
-        // Scroll detection (only when NOT grabbing)
+        // Scroll Tracking (Active ONLY in Two-Finger Scroll Mode)
         let palmY = 1.0 - wrist.location.y
         var scrollD: CGFloat = 0
-        if !isFist, let prevY = previousPalmY {
-            scrollD = palmY - prevY
+        if isTwoFingerScroll, let prevY = previousPalmY {
+            let rawDelta = palmY - prevY
+            // Deadband to ignore tiny hand tremors, amplify deliberate motion
+            if abs(rawDelta) > 0.003 {
+                scrollD = rawDelta * 1.6
+            }
         }
-        previousPalmY = isFist ? nil : palmY
+        previousPalmY = isTwoFingerScroll ? palmY : nil
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isTracking else { return }
@@ -278,7 +284,7 @@ class HandTrackingManager: NSObject {
             self.isGrabbing = isFist
             self.grabPosition = wristPos
 
-            // RESET: Thumbs Up held for 1.5 seconds
+            // RESET COMMAND: Thumbs Up held for 1.5 seconds
             if isThumbsUp {
                 if self.thumbsUpStartedAt == nil {
                     self.thumbsUpStartedAt = Date()
@@ -294,17 +300,18 @@ class HandTrackingManager: NSObject {
             if resetRequested {
                 self.resetCooldown = true
                 self.thumbsUpStartedAt = nil
+                AppLogger.shared.log("[HandTrackingManager] Thumbs-Up Reset triggered!")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     self.resetCooldown = false
                 }
             }
 
-            // CLICK: fire click at the frozen cursor position
+            // CLICK TRIGGER: fire click at the frozen cursor position
             if clickDetected && !self.pinchCooldown && !isFist {
                 self.isPinching = true
                 self.pinchCooldown = true
                 
-                // Pulse isPinching back to false almost immediately so we only click once
+                // Pulse isPinching back to false almost immediately for a crisp click
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     self.isPinching = false
                     self.latestInput = HandTrackingInput(
@@ -319,7 +326,6 @@ class HandTrackingManager: NSObject {
                 }
                 
                 // Keep the cooldown longer so we don't rapid-fire clicks.
-                // During this time cursor stays frozen and visible.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                     self.pinchCooldown = false
                 }

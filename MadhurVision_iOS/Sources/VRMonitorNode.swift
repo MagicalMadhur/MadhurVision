@@ -220,12 +220,18 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak self] in self?.requestSnapshot() }
     }
     
+    private var lastScrollTime = Date()
+    
     func simulateScroll(by delta: CGFloat) {
-        let pixels = delta * 500
-        let js = "window.scrollBy({top: \(pixels), behavior: 'smooth'});"
+        let now = Date()
+        guard now.timeIntervalSince(lastScrollTime) >= 0.035 else { return } // Throttle to avoid WebKit queue flooding
+        lastScrollTime = now
+        
+        let pixels = delta * 650
+        let js = "window.scrollBy({top: \(pixels), behavior: 'auto'});"
         webView?.evaluateJavaScript(js, completionHandler: nil)
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.requestSnapshot() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in self?.requestSnapshot() }
     }
     
     // MARK: - Navigation

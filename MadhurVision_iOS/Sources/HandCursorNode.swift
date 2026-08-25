@@ -1,102 +1,116 @@
 import SceneKit
 import UIKit
+import simd
 
-/// A high-contrast mouse arrow that follows the user's index finger tip in 3D space,
-/// and raycasts against the browser window to drive click/scroll interactions.
+/// Meta Quest-style 3D Spatial Laser Pointer
+/// - Projects a glowing electric-cyan 3D laser beam from the user's hand into VR space.
+/// - Renders an interactive target reticle ring at the exact surface intersection point.
+/// - Flashes tactile electric pulses on click with pinpoint accuracy.
 class HandCursorNode: SCNNode {
 
-    // The closure to call when a pinch-click occurs
+    // Callbacks for VR engine
     var onClick: ((SCNHitTestResult) -> Void)?
     var onScroll: ((SCNHitTestResult, CGFloat) -> Void)?
 
-    // The visible pointer
-    private let dotNode = SCNNode()
+    // 3D Laser Beam Node
+    private let laserNode = SCNNode()
+    private let laserCylinder = SCNCylinder(radius: 0.0028, height: 1.0)
+    private let laserMaterial = SCNMaterial()
+
+    // 3D Target Reticle Ring
+    private let reticleNode = SCNNode()
+    private let ringMaterial = SCNMaterial()
 
     override init() {
         super.init()
-        setupCursor()
+        setupLaserBeam()
+        setupReticle()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func setupCursor() {
-        let plane = SCNPlane(width: 0.05, height: 0.065)
-        let material = SCNMaterial()
-        let pointerImage = createPointerImage()
-        material.diffuse.contents = pointerImage
-        material.transparent.contents = pointerImage
-        material.emission.contents = UIColor(white: 1.0, alpha: 0.35)
-        material.lightingModel = .constant
-        material.isDoubleSided = true
-        material.readsFromDepthBuffer = false
-        material.writesToDepthBuffer = false
-        plane.materials = [material]
+    // MARK: - Setup Geometry
 
-        dotNode.geometry = plane
-        // Anchor the arrow tip at the raycast point instead of its centre.
-        dotNode.pivot = SCNMatrix4MakeTranslation(-0.025, 0.0325, 0)
-        let billboard = SCNBillboardConstraint()
-        billboard.freeAxes = .all
-        dotNode.constraints = [billboard]
-        dotNode.isHidden = true
-        addChildNode(dotNode)
+    private func setupLaserBeam() {
+        laserCylinder.radialSegmentCount = 12
+        laserCylinder.heightSegmentCount = 1
+        
+        laserMaterial.diffuse.contents = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.85)
+        laserMaterial.emission.contents = UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0)
+        laserMaterial.lightingModel = .constant
+        laserMaterial.isDoubleSided = true
+        laserMaterial.blendMode = .add
+        laserMaterial.readsFromDepthBuffer = false
+        laserMaterial.writesToDepthBuffer = false
+        laserCylinder.materials = [laserMaterial]
+
+        laserNode.geometry = laserCylinder
+        laserNode.isHidden = true
+        addChildNode(laserNode)
     }
 
-    private func createPointerImage() -> UIImage {
-        let size = CGSize(width: 160, height: 200)
+    private func setupReticle() {
+        // Outer Target Ring
+        let ringPlane = SCNPlane(width: 0.045, height: 0.045)
+        let ringImage = createReticleImage()
+        ringMaterial.diffuse.contents = ringImage
+        ringMaterial.transparent.contents = ringImage
+        ringMaterial.emission.contents = UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 0.8)
+        ringMaterial.lightingModel = .constant
+        ringMaterial.isDoubleSided = true
+        ringMaterial.readsFromDepthBuffer = false
+        ringMaterial.writesToDepthBuffer = false
+        ringPlane.materials = [ringMaterial]
+
+        reticleNode.geometry = ringPlane
+        let billboard = SCNBillboardConstraint()
+        billboard.freeAxes = .all
+        reticleNode.constraints = [billboard]
+        reticleNode.isHidden = true
+        addChildNode(reticleNode)
+    }
+
+    private func createReticleImage() -> UIImage {
+        let size = CGSize(width: 128, height: 128)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { context in
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: 20, y: 12))
-            path.addLine(to: CGPoint(x: 20, y: 148))
-            path.addLine(to: CGPoint(x: 54, y: 110))
-            path.addLine(to: CGPoint(x: 84, y: 182))
-            path.addLine(to: CGPoint(x: 110, y: 170))
-            path.addLine(to: CGPoint(x: 80, y: 98))
-            path.addLine(to: CGPoint(x: 140, y: 98))
-            path.close()
-
-            // 1. Drop shadow (dark, offset down-right)
+            let center = CGPoint(x: 64, y: 64)
+            
+            // Outer glow shadow
             context.cgContext.saveGState()
-            context.cgContext.setShadow(
-                offset: CGSize(width: 4, height: 6),
-                blur: 10,
-                color: UIColor(white: 0, alpha: 0.8).cgColor
-            )
-            context.cgContext.setFillColor(UIColor.black.cgColor)
-            context.cgContext.addPath(path.cgPath)
-            context.cgContext.fillPath()
+            context.cgContext.setShadow(offset: .zero, blur: 12, color: UIColor(red: 0, green: 0.83, blue: 1.0, alpha: 0.9).cgColor)
+            
+            // Outer Ring
+            let ringPath = UIBezierPath(arcCenter: center, radius: 46, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            ringPath.lineWidth = 6
+            UIColor.white.setStroke()
+            ringPath.stroke()
+            
+            // Dark Outline for outer ring (visible against white backgrounds)
+            let darkRing = UIBezierPath(arcCenter: center, radius: 49, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            darkRing.lineWidth = 2
+            UIColor.black.setStroke()
+            darkRing.stroke()
+
+            // Center Focal Dot
+            let dotPath = UIBezierPath(arcCenter: center, radius: 10, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            UIColor.white.setFill()
+            dotPath.fill()
+            
+            let dotBorder = UIBezierPath(arcCenter: center, radius: 11, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            dotBorder.lineWidth = 2
+            UIColor.black.setStroke()
+            dotBorder.stroke()
+            
             context.cgContext.restoreGState()
-
-            // 2. Thick black outline (drawn first, behind the white fill)
-            context.cgContext.setStrokeColor(UIColor.black.cgColor)
-            context.cgContext.setLineWidth(14)
-            context.cgContext.setLineJoin(.round)
-            context.cgContext.addPath(path.cgPath)
-            context.cgContext.strokePath()
-
-            // 3. White fill
-            context.cgContext.setFillColor(UIColor.white.cgColor)
-            context.cgContext.addPath(path.cgPath)
-            context.cgContext.fillPath()
-
-            // 4. Thin cyan inner border for style
-            context.cgContext.setStrokeColor(UIColor(red: 0, green: 0.83, blue: 1.0, alpha: 0.5).cgColor)
-            context.cgContext.setLineWidth(2)
-            context.cgContext.addPath(path.cgPath)
-            context.cgContext.strokePath()
         }
     }
 
-    private var smoothedFingerPos: CGPoint? = nil
-
     // MARK: - Update per frame
 
-    /// Called every render frame from VREngine.
-    /// `fingerPos` is normalized (0–1) in screen space.
-    /// `cameraNode` is the active eye camera for raycasting.
+    private var smoothedFingerPos: CGPoint? = nil
     private var previousIsPinching = false
 
     func update(fingerPos: CGPoint,
@@ -106,17 +120,18 @@ class HandCursorNode: SCNNode {
                 scrollDelta: CGFloat) {
 
         guard fingerPos != .zero else {
-            dotNode.isHidden = true
+            laserNode.isHidden = true
+            reticleNode.isHidden = true
             smoothedFingerPos = nil
             previousIsPinching = false
             return
         }
 
-        // Responsive filter — smooths micro-jitter without sluggish tracking delay
+        // Responsive low-pass filter (alpha = 0.22)
         if smoothedFingerPos == nil {
             smoothedFingerPos = fingerPos
         } else {
-            let alpha: CGFloat = 0.20
+            let alpha: CGFloat = 0.22
             let current = smoothedFingerPos!
             smoothedFingerPos = CGPoint(
                 x: current.x + (fingerPos.x - current.x) * alpha,
@@ -125,70 +140,116 @@ class HandCursorNode: SCNNode {
         }
         let pos = smoothedFingerPos!
 
-        // Apply sensitivity multiplier so the user doesn't have to move their hand out of the camera's narrow FOV
+        // Map 2D camera coordinates with 2.5x sensitivity boost
         let sensitivity: Float = 2.5
         let ndcX = Float(pos.x * 2.0 - 1.0) * sensitivity
-        let ndcY = -Float(pos.y * 2.0 - 1.0) * sensitivity // INVERT Y-AXIS HERE
+        let ndcY = -Float(pos.y * 2.0 - 1.0) * sensitivity // Invert Y
 
-        // Build a ray in camera space (pointing into the scene, at distance 3m)
-        let rayDirection = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.0)
+        // 1. Compute Hand Origin in 3D Camera Space (anchored forward and slightly lower like a natural holding hand)
+        let localHandPos = SCNVector3(ndcX * 0.35 + 0.08, ndcY * 0.35 - 0.16, -0.38)
+        let worldHandPos = cameraNode.convertPosition(localHandPos, to: nil)
 
-        // Transform to world space
-        let worldOrigin    = cameraNode.worldPosition
-        let worldDirection = cameraNode.convertVector(rayDirection, to: nil)
+        // 2. Compute Ray Target Direction (pointing into 3D VR space)
+        let localTargetPos = SCNVector3(ndcX * 1.6, ndcY * 1.6, -3.5)
+        let worldTargetPos = cameraNode.convertPosition(localTargetPos, to: nil)
 
-        let rayEnd = SCNVector3(
-            worldOrigin.x + worldDirection.x,
-            worldOrigin.y + worldDirection.y,
-            worldOrigin.z + worldDirection.z
-        )
+        // Segment endpoints
+        let rayStart = worldHandPos
+        let rayEnd   = worldTargetPos
 
-        // --- Generic Raycast ---
+        // 3. Raycast against SceneKit world
         let hits = scene.rootNode.hitTestWithSegment(
-            from: worldOrigin,
+            from: rayStart,
             to: rayEnd,
             options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
         )
 
-        // Find the first hit that isn't the cursor itself
-        if let hit = hits.first(where: { $0.node !== self && $0.node !== dotNode }) {
-            // Cursor is hitting an object in the world
-            dotNode.isHidden = false
+        // Find intersection with the interactive monitor
+        if let hit = hits.first(where: { $0.node !== self && $0.node !== laserNode && $0.node !== reticleNode }) {
+            let hitPoint = hit.worldCoordinates
             let normal = hit.node.convertVector(hit.localNormal, to: nil)
-            dotNode.worldPosition = SCNVector3(
-                hit.worldCoordinates.x + normal.x * 0.008,
-                hit.worldCoordinates.y + normal.y * 0.008,
-                hit.worldCoordinates.z + normal.z * 0.008
+
+            // Show and position reticle ring hugging surface
+            reticleNode.isHidden = false
+            reticleNode.worldPosition = SCNVector3(
+                hitPoint.x + normal.x * 0.006,
+                hitPoint.y + normal.y * 0.006,
+                hitPoint.z + normal.z * 0.006
             )
-            
-            // Only fire click once per pinch/click (rising edge trigger)
+
+            // Position & stretch 3D laser beam from hand to contact point
+            positionLaserBeam(from: rayStart, to: hitPoint)
+
+            // Fire click on rising edge
             if isPinching && !previousIsPinching {
                 onClick?(hit)
                 animateClick()
             }
-            
-            // The engine validates the target and forwards the WebKit call to
-            // the main thread. This renderer never performs UIKit work itself.
+
+            // Forward scrolling
             if scrollDelta != 0 {
                 onScroll?(hit, scrollDelta)
             }
         } else {
-            // Keep the arrow visible even when the ray misses the panel. This
-            // makes it clear that index tracking is active; it simply cannot
-            // click until the arrow reaches an interactive surface.
-            dotNode.isHidden = false
-            dotNode.worldPosition = rayEnd
+            // Laser shoots into space without hitting
+            reticleNode.isHidden = true
+            positionLaserBeam(from: rayStart, to: rayEnd)
         }
-        
+
         previousIsPinching = isPinching
     }
 
+    // MARK: - 3D Laser Beam Alignment
+
+    private func positionLaserBeam(from start: SCNVector3, to end: SCNVector3) {
+        laserNode.isHidden = false
+
+        let p1 = simd_float3(start.x, start.y, start.z)
+        let p2 = simd_float3(end.x, end.y, end.z)
+        let delta = p2 - p1
+        let distance = simd_length(delta)
+
+        guard distance > 0.01 else {
+            laserNode.isHidden = true
+            return
+        }
+
+        // 1. Update cylinder length
+        laserCylinder.height = CGFloat(distance)
+
+        // 2. Position cylinder at midpoint
+        let mid = (p1 + p2) * 0.5
+        laserNode.simdPosition = mid
+
+        // 3. Rotate cylinder (default axis is Y) to point along delta
+        let dir = simd_normalize(delta)
+        let yAxis = simd_float3(0, 1, 0)
+        let quat = simd_quatf(from: yAxis, to: dir)
+        laserNode.simdOrientation = quat
+    }
+
+    // MARK: - Click Animation (Electric Flash & Pop)
+
     private func animateClick() {
-        let pulse = SCNAction.sequence([
-            SCNAction.scale(to: 0.7, duration: 0.06),
-            SCNAction.scale(to: 1.15, duration: 0.08),
+        // Flash laser beam
+        let laserFlash = SCNAction.sequence([
+            SCNAction.customAction(duration: 0.08) { [weak self] _, _ in
+                self?.laserMaterial.emission.contents = UIColor.white
+                self?.laserCylinder.radius = 0.006
+            },
+            SCNAction.customAction(duration: 0.12) { [weak self] _, _ in
+                self?.laserMaterial.emission.contents = UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0)
+                self?.laserCylinder.radius = 0.0028
+            }
+        ])
+        laserNode.runAction(laserFlash)
+
+        // Pulse reticle ring
+        let reticlePop = SCNAction.sequence([
+            SCNAction.scale(to: 0.6, duration: 0.06),
+            SCNAction.scale(to: 1.3, duration: 0.08),
             SCNAction.scale(to: 1.0, duration: 0.08)
         ])
-        dotNode.runAction(pulse)
+        reticleNode.runAction(reticlePop)
     }
 }
