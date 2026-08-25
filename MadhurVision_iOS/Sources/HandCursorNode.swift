@@ -167,6 +167,7 @@ class HandCursorNode: SCNNode {
             options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue]
         )
 
+        let targetEndPoint: SCNVector3
         // Find intersection with the interactive monitor
         if let hit = hits.first(where: { $0.node !== self && $0.node !== laserNode && $0.node !== reticleNode }) {
             let hitPoint = hit.worldCoordinates
@@ -179,9 +180,7 @@ class HandCursorNode: SCNNode {
                 hitPoint.y + normal.y * 0.006,
                 hitPoint.z + normal.z * 0.006
             )
-
-            // Position & stretch 3D laser beam from hand to contact point
-            positionLaserBeam(from: rayStart, to: hitPoint)
+            targetEndPoint = hitPoint
 
             // Fire click on rising edge
             if isPinching && !previousIsPinching {
@@ -194,11 +193,13 @@ class HandCursorNode: SCNNode {
                 onScroll?(hit, scrollDelta)
             }
         } else {
-            // Laser shoots into space without hitting
+            // When laser moves past monitor edges, project to monitor depth plane (-2.0m)
+            // so beam length never jumps or glitches abruptly!
             reticleNode.isHidden = true
-            positionLaserBeam(from: rayStart, to: rayEnd)
+            targetEndPoint = cameraNode.convertPosition(SCNVector3(ndcX * 1.5, ndcY * 1.5, -2.0), to: nil)
         }
 
+        positionLaserBeam(from: rayStart, to: targetEndPoint)
         previousIsPinching = isPinching
     }
 

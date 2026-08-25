@@ -12,6 +12,7 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         INFOPLIST_KEY_NSCameraUsageDescription: "Camera access is required for VR tracking."
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Microphone access is required for VR voice search and voice commands."
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Local network access is required to connect to the PC."
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
         INFOPLIST_KEY_UIStatusBarHidden: "YES"

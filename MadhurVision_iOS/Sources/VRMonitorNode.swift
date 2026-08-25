@@ -219,14 +219,28 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     
                     var clickable = el.closest('a, button, input, textarea, [role="button"], .card, .dock-item, .nav-btn, .vfd-btn');
                     if(clickable) {
-                        clickable.focus();
                         if(typeof clickable.click === 'function') clickable.click();
                     } else if(typeof el.click === 'function') {
                         el.click();
                     }
                     
-                    if(el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-                        el.focus();
+                    // Suppress native iOS mobile software keyboard and open VR Air Keyboard
+                    var inputEl = el.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"]');
+                    if(inputEl) {
+                        inputEl.setAttribute('inputmode', 'none');
+                        inputEl.focus();
+                        var kb = document.getElementById('vr-air-keyboard');
+                        if(kb) kb.classList.add('visible');
+                    }
+                    
+                    // Auto-start video playback when clicking on video or player
+                    var v = document.querySelector('video');
+                    if(v && v.paused) {
+                        v.play().catch(function(){});
+                    }
+                    var playBtn = document.querySelector('.ytp-play-button, .ytp-large-play-button');
+                    if(playBtn && el.closest('.html5-video-player, ytd-watch-flexy, #movie_player')) {
+                        playBtn.click();
                     }
                 }
             })();
