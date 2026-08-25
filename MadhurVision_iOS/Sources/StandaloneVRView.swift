@@ -302,12 +302,8 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         let node = hit.node
         if let monitor = monitorNode,
            node === monitor || node.parent === monitor || node.name == "monitor_border" {
-            let uv = CGPoint(
-                x: CGFloat(hit.textureCoordinates(withMappingChannel: 0).x),
-                y: CGFloat(1.0 - hit.textureCoordinates(withMappingChannel: 0).y)
-            )
-            // WebKit must run on the main thread. Only the UIKit interaction
-            // crosses threads; all SceneKit reads above happen in the renderer.
+            let uv = monitor.uvCoordinates(fromWorldPoint: hit.worldCoordinates)
+            AppLogger.shared.log("[VREngine] Laser Click registered at UV: (\(String(format: "%.3f", uv.x)), \(String(format: "%.3f", uv.y))) on node: \(node.name ?? "unnamed")")
             DispatchQueue.main.async { [weak monitor] in
                 monitor?.simulateClick(at: uv)
             }

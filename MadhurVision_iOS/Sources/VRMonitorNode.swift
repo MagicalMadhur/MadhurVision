@@ -20,8 +20,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     var onSnapshotImage: ((UIImage) -> Void)?
     
     private var webView: WKWebView!
-    private let monitorWidth: CGFloat
-    private let monitorHeight: CGFloat
+    let monitorWidth: CGFloat
+    let monitorHeight: CGFloat
     private var snapshotTimer: Timer?
     private var isSnapshotting = false
     private var isShowingOS = true
@@ -73,6 +73,15 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         webView?.stopLoading()
         webView?.removeFromSuperview()
         webView = nil
+    }
+
+    /// Converts a 3D world contact point into exact normalized (0.0 to 1.0) UV coordinates on the monitor surface.
+    /// Uses physical geometry bounds rather than texture mapping channels for 100% mathematical precision.
+    func uvCoordinates(fromWorldPoint worldPoint: SCNVector3) -> CGPoint {
+        let local = convertPosition(worldPoint, from: nil)
+        let u = CGFloat(min(max((local.x / Float(monitorWidth)) + 0.5, 0.0), 1.0))
+        let v = CGFloat(min(max(0.5 - (local.y / Float(monitorHeight)), 0.0), 1.0))
+        return CGPoint(x: u, y: v)
     }
     
     // MARK: - WebView Setup
@@ -194,18 +203,27 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 var el = document.elementFromPoint(cssX, cssY);
                 
                 if(el) {
-                    // Visual feedback ripple dot
+                    // Visual feedback ripple dot on the web canvas
                     var dot = document.createElement('div');
-                    dot.style.cssText = 'position:fixed;left:'+(cssX-6)+'px;top:'+(cssY-6)+'px;width:12px;height:12px;background:rgba(0,212,255,0.9);border-radius:50%;z-index:999999;pointer-events:none;box-shadow:0 0 10px #00d4ff;transition:transform 0.3s, opacity 0.3s;';
+                    dot.style.cssText = 'position:fixed;left:'+(cssX-12)+'px;top:'+(cssY-12)+'px;width:24px;height:24px;background:rgba(0,212,255,0.9);border-radius:50%;z-index:999999;pointer-events:none;box-shadow:0 0 20px #00d4ff;transition:transform 0.35s, opacity 0.35s;';
                     document.body.appendChild(dot);
-                    requestAnimationFrame(function(){ dot.style.transform = 'scale(2.5)'; dot.style.opacity = '0'; });
-                    setTimeout(function(){ dot.remove(); }, 350);
+                    requestAnimationFrame(function(){ dot.style.transform = 'scale(2.2)'; dot.style.opacity = '0'; });
+                    setTimeout(function(){ dot.remove(); }, 380);
                     
-                    var opts = {bubbles:true, cancelable:true, view:window, clientX:cssX, clientY:cssY};
+                    var opts = {bubbles:true, cancelable:true, view:window, clientX:cssX, clientY:cssY, screenX:cssX, screenY:cssY};
                     el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({}, opts, {pointerType:'touch'})));
                     el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, opts, {pointerType:'touch'})));
+                    el.dispatchEvent(new MouseEvent('mousedown', opts));
+                    el.dispatchEvent(new MouseEvent('mouseup', opts));
                     el.dispatchEvent(new MouseEvent('click', opts));
-                    if(typeof el.click === 'function') el.click();
+                    
+                    var clickable = el.closest('a, button, input, textarea, [role="button"], .card, .dock-item, .nav-btn, .vfd-btn');
+                    if(clickable) {
+                        clickable.focus();
+                        if(typeof clickable.click === 'function') clickable.click();
+                    } else if(typeof el.click === 'function') {
+                        el.click();
+                    }
                     
                     if(el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
                         el.focus();
