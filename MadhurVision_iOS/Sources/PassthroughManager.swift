@@ -87,6 +87,14 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
+        // Render camera feed as the SceneKit scene background. Both eyes share
+        // the same SCNScene, so both automatically see the camera. CIImage from
+        // CVPixelBuffer is lazy (zero-copy), making this very efficient.
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        DispatchQueue.main.async { [weak self] in
+            self?.scene?.background.contents = ciImage
+        }
+        
         // Feed raw frame to HandTrackingManager (runs its own async vision queue)
         HandTrackingManager.shared.processFrame(pixelBuffer)
     }

@@ -40,27 +40,18 @@ class DualEyeContainerView: UIView {
     let leftView: SCNView
     let rightView: SCNView
     
-    // iOS only supports ONE AVCaptureVideoPreviewLayer per AVCaptureSession.
-    // Creating two silently disconnects the first. Instead we use a single
-    // preview layer inside a CAReplicatorLayer that mirrors it for the right eye.
-    private let cameraPreview: AVCaptureVideoPreviewLayer
-    private let replicatorLayer = CAReplicatorLayer()
+    // Camera feed is rendered INSIDE SceneKit via scene.background.contents,
+    // not as a separate CALayer behind the SCNViews. CAMetalLayer (used by
+    // SCNView) cannot alpha-composite with layers behind it during live GPU
+    // rendering — that's why preview layers appeared black on-screen but
+    // showed correctly in screenshots.
     
     init(leftView: SCNView, rightView: SCNView) {
         self.leftView = leftView
         self.rightView = rightView
         
-        cameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
-        cameraPreview.videoGravity = .resizeAspectFill
-        
         super.init(frame: .zero)
         self.backgroundColor = .black
-        
-        // Replicator creates 2 copies side by side (left eye = original, right eye = replica)
-        replicatorLayer.instanceCount = 2
-        replicatorLayer.preservesDepth = true
-        replicatorLayer.addSublayer(cameraPreview)
-        self.layer.addSublayer(replicatorLayer)
         
         self.addSubview(leftView)
         self.addSubview(rightView)
@@ -73,19 +64,9 @@ class DualEyeContainerView: UIView {
         
         let orientation = UIApplication.shared.windows.first?.windowScene?.interfaceOrientation ?? .landscapeRight
         let avOrientation: AVCaptureVideoOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
-        
-        if let connection = cameraPreview.connection, connection.isVideoOrientationSupported {
-            connection.videoOrientation = avOrientation
-        }
         PassthroughManager.shared.updateOrientation(avOrientation)
         
         let halfWidth = bounds.width / 2.0
-        
-        // The replicator spans the full screen; each instance is halfWidth wide.
-        replicatorLayer.frame = bounds
-        replicatorLayer.instanceTransform = CATransform3DMakeTranslation(halfWidth, 0, 0)
-        cameraPreview.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
-        
         leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
         rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
     }
@@ -95,9 +76,6 @@ struct DualEyeVRContainer: UIViewRepresentable {
     let vrEngine: VREngine
     
     func makeUIView(context: Context) -> DualEyeContainerView {
-        // Both preview layers must be created after the capture input exists.
-        // Otherwise one eye can end up with no AVCapture connection at all.
-        _ = PassthroughManager.shared.prepare()
 
         let leftView = SCNView()
         leftView.scene = vrEngine.scene
