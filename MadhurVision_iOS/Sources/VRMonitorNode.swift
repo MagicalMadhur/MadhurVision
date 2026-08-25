@@ -129,8 +129,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         webView.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
         webView.navigationDelegate = self
         
-        // Modern Tablet/iPad User Agent (serves clean HTML5 inline video without restrictive DRM errors)
-        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+        // Desktop Mac User Agent (serves clean HTML5 inline video without restrictive DRM errors, and enables autoplay)
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
         
         // Load OS HTML
         let osHTML = VRMonitorNode.generateOSHTML()
@@ -557,6 +557,47 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     v.setAttribute('playsinline', 'true');
                     v.setAttribute('webkit-playsinline', 'true');
                     v.removeAttribute('controlslist');
+                    
+                    // WKWebView Canvas Hack: WKWebView's takeSnapshot cannot capture hardware accelerated video layers.
+                    // We must draw the video onto a canvas overlay manually!
+                    if (!v.dataset.canvasInjected) {
+                        v.dataset.canvasInjected = "true";
+                        
+                        var canvas = document.createElement('canvas');
+                        canvas.style.position = 'absolute';
+                        canvas.style.top = '0';
+                        canvas.style.left = '0';
+                        canvas.style.width = '100%';
+                        canvas.style.height = '100%';
+                        canvas.style.pointerEvents = 'none'; // let clicks pass through
+                        canvas.style.zIndex = '999';
+                        
+                        if (v.parentNode) {
+                            // Ensure parent is positioned to hold absolute canvas
+                            if (window.getComputedStyle(v.parentNode).position === 'static') {
+                                v.parentNode.style.position = 'relative';
+                            }
+                            v.parentNode.insertBefore(canvas, v.nextSibling);
+                        }
+                        
+                        var ctx = canvas.getContext('2d', { alpha: false });
+                        
+                        function renderFrame() {
+                            if (!v.paused && !v.ended && v.readyState >= 2 && v.videoWidth > 0) {
+                                if (canvas.width !== v.videoWidth) {
+                                    canvas.width = v.videoWidth;
+                                    canvas.height = v.videoHeight;
+                                }
+                                ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+                            }
+                            requestAnimationFrame(renderFrame);
+                        }
+                        requestAnimationFrame(renderFrame);
+                        
+                        // Make original video transparent so the canvas shows through, but keep opacity > 0 so it stays active
+                        v.style.opacity = '0.01';
+                    }
+
                     if (v.paused && !v.ended && v.readyState >= 1) {
                         var p = v.play();
                         if (p !== undefined) {
@@ -565,6 +606,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     }
                 });
                 
+                // Try clicking YouTube play buttons automatically
                 var ytpPlay = document.querySelector('.ytp-large-play-button, .player-controls-middle button');
                 if (ytpPlay && ytpPlay.offsetParent !== null) {
                     ytpPlay.click();
