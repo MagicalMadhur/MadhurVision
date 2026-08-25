@@ -129,8 +129,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         webView.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
         webView.navigationDelegate = self
         
-        // Desktop Mac Safari User Agent (serves full desktop HTML5 video with direct playback)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+        // Modern Tablet/iPad User Agent (serves clean HTML5 inline video without restrictive DRM errors)
+        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
         
         // Load OS HTML
         let osHTML = VRMonitorNode.generateOSHTML()
@@ -540,23 +540,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     private static func videoPlaybackHelperJS() -> String {
         return """
         (function() {
-            // Auto-embed converter: If navigating to a YouTube watch page, load the clean embed player
-            // which renders via standard HTML5 Canvas without DRM overlay, fully captured in VR!
-            function checkYouTubeWatchURL() {
-                var href = window.location.href;
-                if (href.indexOf('youtube.com/watch') !== -1 || href.indexOf('m.youtube.com/watch') !== -1) {
-                    var match = href.match(/[?&]v=([^&]+)/);
-                    if (match && match[1]) {
-                        var videoId = match[1];
-                        var embedUrl = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&playsinline=1&enablejsapi=1&rel=0';
-                        if (window.location.href !== embedUrl) {
-                            window.location.replace(embedUrl);
-                        }
-                    }
-                }
-            }
-            setInterval(checkYouTubeWatchURL, 400);
-
             // Ensure inline video playback flags on all video elements
             function enforceInlineVideos() {
                 var videos = document.querySelectorAll('video');

@@ -55,6 +55,7 @@ class HandTrackingManager: NSObject {
     private var pinchCooldown = false
     private var resetCooldown = false
     private var openPalmStartedAt: Date?
+    private var lastHandSeenAt: Date? = nil
     private var isRunning = false
     private let oneEuroFilter = OneEuroFilter2D(minCutoff: 1.1, beta: 0.007, dCutoff: 1.0)
     /// Last good cursor position before a pinch started. Used to freeze the
@@ -147,54 +148,50 @@ class HandTrackingManager: NSObject {
             return
         }
 
-        guard let observation = handPoseRequest.results?.first else {
-            DispatchQueue.main.async {
-                guard self.isTracking else { return }
-                self.indexTipPosition = .zero
-                self.isGrabbing = false
-                self.latestInput = .noHand
+        if let observation = handPoseRequest.results?.first {
+            lastHandSeenAt = Date()
+            if !didLogFirstHandDetected {
+                didLogFirstHandDetected = true
+                AppLogger.shared.log("[HandTrackingManager] First hand successfully detected by Vision!")
             }
-            previousPalmY = nil
-            return
+            processHandObservation(observation)
+        } else {
+            // Temporal Grace Period: hold cursor for up to 350ms on momentary camera drops
+            let elapsed = lastHandSeenAt.map { Date().timeIntervalSince($0) } ?? 1.0
+            if elapsed > 0.35 {
+                DispatchQueue.main.async {
+                    guard self.isTracking else { return }
+                    self.indexTipPosition = .zero
+                    self.isGrabbing = false
+                    self.latestInput = .noHand
+                }
+                previousPalmY = nil
+                oneEuroFilter.reset()
+            }
         }
-
-        if !didLogFirstHandDetected {
-            didLogFirstHandDetected = true
-            AppLogger.shared.log("[HandTrackingManager] First hand successfully detected by Vision!")
-        }
-
-        processHandObservation(observation)
     }
 
     // MARK: - Hand Landmark Processing
 
     private func processHandObservation(_ observation: VNHumanHandPoseObservation) {
-        guard let indexTip  = try? observation.recognizedPoint(.indexTip),
-              let indexPIP  = try? observation.recognizedPoint(.indexPIP),
-              let indexMCP  = try? observation.recognizedPoint(.indexMCP),
-              let middleTip = try? observation.recognizedPoint(.middleTip),
-              let middleMCP = try? observation.recognizedPoint(.middleMCP),
-              let ringTip   = try? observation.recognizedPoint(.ringTip),
-              let ringMCP   = try? observation.recognizedPoint(.ringMCP),
-              let thumbTip  = try? observation.recognizedPoint(.thumbTip),
-              let wrist     = try? observation.recognizedPoint(.wrist),
-              indexTip.confidence > 0.5,
-              thumbTip.confidence > 0.5,
-              wrist.confidence > 0.5 else { return }
+        guard let indexTip = try? observation.recognizedPoint(.indexTip),
+              let indexMCP = try? observation.recognizedPoint(.indexMCP),
+              let wrist    = try? observation.recognizedPoint(.wrist),
+              indexTip.confidence > 0.20,
+              wrist.confidence > 0.15 else { return }
 
-        // The little finger completes the fist test. It is optional only so a
-        // temporarily occluded little finger can never turn a partial gesture
-        // into a grab.
+        let indexPIP  = try? observation.recognizedPoint(.indexPIP)
+        let middleTip = try? observation.recognizedPoint(.middleTip)
+        let middleMCP = try? observation.recognizedPoint(.middleMCP)
+        let ringTip   = try? observation.recognizedPoint(.ringTip)
+        let ringMCP   = try? observation.recognizedPoint(.ringMCP)
+        let thumbTip  = try? observation.recognizedPoint(.thumbTip)
         let littleTip = try? observation.recognizedPoint(.littleTip)
         let littleMCP = try? observation.recognizedPoint(.littleMCP)
 
-        // Use raw index tip for cursor — most accurate for where the user is pointing.
-        let indexPos = CGPoint(x: indexTip.location.x,
-                               y: 1.0 - indexTip.location.y)
-        let thumbPos = CGPoint(x: thumbTip.location.x,
-                               y: 1.0 - thumbTip.location.y)
-        let middlePos = CGPoint(x: middleTip.location.x,
-                                y: 1.0 - middleTip.location.y)
+        let indexPos = CGPoint(x: indexTip.location.x, y: 1.0 - indexTip.location.y)
+        let thumbPos = thumbTip.map { CGPoint(x: $0.location.x, y: 1.0 - $0.location.y) } ?? .zero
+        let middlePos = middleTip.map { CGPoint(x: $0.location.x, y: 1.0 - $0.location.y) } ?? .zero
 
         func distance(_ first: VNRecognizedPoint, _ second: VNRecognizedPoint) -> CGFloat {
             hypot(first.location.x - second.location.x, first.location.y - second.location.y)
