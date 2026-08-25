@@ -53,11 +53,11 @@ class HandTrackingManager: NSObject {
     // Tracking state
     private var previousPalmY: CGFloat? = nil
     private var pinchCooldown = false
+    private var pinchReleased = true
     private var resetCooldown = false
     private var openPalmStartedAt: Date?
     private var lastHandSeenAt: Date? = nil
     private var isRunning = false
-    private let oneEuroFilter = OneEuroFilter2D(minCutoff: 1.1, beta: 0.007, dCutoff: 1.0)
     /// Last good cursor position before a pinch started. Used to freeze the
     /// click location so it lands exactly where the user was pointing.
     private var lastGoodCursorPosition: CGPoint = .zero
@@ -247,10 +247,14 @@ class HandTrackingManager: NSObject {
         let isPointing = (indexExtended && !isTwoFingerScroll && !isFist && !isOpenPalm) || pinchCooldown
 
         // CLICK GESTURE (active only during Pointing):
-        // Requires extreme closeness / true touching (distance < 0.038) to prevent false clicks with light gaps
-        let thumbMiddleDist = hypot(thumbPos.x - middlePos.x, thumbPos.y - middlePos.y)
-        let thumbIndexDist  = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
-        let clickDetected   = isPointing && !pinchCooldown && (thumbMiddleDist < 0.038 || thumbIndexDist < 0.035)
+        // Uses Index Tip + Thumb Tip physical pinch (distance < 0.034).
+        // Middle finger distance is omitted to prevent false clicks when hand is angled/sideways.
+        let thumbIndexDist = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
+        let pinchContact = thumbTip != nil && thumbIndexDist < 0.034
+        if !pinchContact && thumbIndexDist > 0.055 {
+            pinchReleased = true
+        }
+        let clickDetected = isPointing && pinchContact && pinchReleased && !pinchCooldown && !isFist
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
         let indexMCPPos = CGPoint(x: indexMCP.location.x, y: 1.0 - indexMCP.location.y)
@@ -330,6 +334,7 @@ class HandTrackingManager: NSObject {
             if clickDetected && !self.pinchCooldown && !isFist {
                 self.isPinching = true
                 self.pinchCooldown = true
+                self.pinchReleased = false
                 
                 // Pulse isPinching back to false almost immediately for a crisp click
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

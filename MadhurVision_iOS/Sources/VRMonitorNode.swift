@@ -156,7 +156,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 // with alpha = 1.0 (so snapshots are fully opaque) and inserted at bottom (index 0)
                 // so WebKit keeps the 60 FPS hardware video decoding engine active at full speed!
                 self.webView.frame = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
-                self.webView.isUserInteractionEnabled = false
+                self.webView.isUserInteractionEnabled = true
                 self.webView.alpha = 1.0 
                 window.insertSubview(self.webView, at: 0)
             }
@@ -230,9 +230,11 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     el.dispatchEvent(new MouseEvent('mouseup', opts));
                     el.dispatchEvent(new MouseEvent('click', opts));
                     
-                    var clickable = el.closest('a, button, input, textarea, [role="button"], .card, .dock-item, .nav-btn, .vfd-btn');
+                    var clickable = el.closest('a, button, input, textarea, [role="button"], .card, .dock-item, .nav-btn, .vfd-btn, ytd-thumbnail, ytd-rich-item-renderer, ytd-compact-video-renderer, ytd-video-renderer, yt-img-shadow, .media-item-thumbnail-container, .ytp-play-button, .ytp-large-play-button');
                     if(clickable) {
                         if(typeof clickable.click === 'function') clickable.click();
+                        var link = clickable.closest('a') || clickable.querySelector('a');
+                        if(link && typeof link.click === 'function') link.click();
                     } else if(typeof el.click === 'function') {
                         el.click();
                     }
