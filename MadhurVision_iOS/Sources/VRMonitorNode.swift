@@ -543,7 +543,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         """
     }
 
-    // MARK: - Video Playback Enforcer JS
+    // MARK: - Video Playback Enforcer & Canvas Blitter JS
     
     private static func videoPlaybackHelperJS() -> String {
         return """
@@ -560,6 +560,40 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 });
             }
             setInterval(unlockAllVideos, 600);
+            
+            // Canvas Video Blitter: renders live video frames onto a 2D canvas
+            // so WKWebView.takeSnapshot captures full-color video frames instead of black boxes
+            var videoCanvas = null;
+            var canvasCtx = null;
+            
+            function renderVideoFrameToCanvas() {
+                var v = document.querySelector('video');
+                if (v && !v.paused && v.readyState >= 2) {
+                    if (!videoCanvas) {
+                        videoCanvas = document.createElement('canvas');
+                        videoCanvas.id = 'vr-video-canvas';
+                        videoCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
+                        if (v.parentElement) {
+                            v.parentElement.style.position = 'relative';
+                            v.parentElement.appendChild(videoCanvas);
+                        }
+                    }
+                    var vw = v.videoWidth || 1280;
+                    var vh = v.videoHeight || 720;
+                    if (videoCanvas.width !== vw || videoCanvas.height !== vh) {
+                        videoCanvas.width = vw;
+                        videoCanvas.height = vh;
+                        canvasCtx = videoCanvas.getContext('2d');
+                    }
+                    if (canvasCtx) {
+                        try {
+                            canvasCtx.drawImage(v, 0, 0, videoCanvas.width, videoCanvas.height);
+                        } catch(e) {}
+                    }
+                }
+                requestAnimationFrame(renderVideoFrameToCanvas);
+            }
+            requestAnimationFrame(renderVideoFrameToCanvas);
             
             document.addEventListener('DOMContentLoaded', function() {
                 setTimeout(function() {

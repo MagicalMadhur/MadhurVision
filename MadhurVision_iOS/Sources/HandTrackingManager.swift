@@ -54,7 +54,7 @@ class HandTrackingManager: NSObject {
     private var previousPalmY: CGFloat? = nil
     private var pinchCooldown = false
     private var resetCooldown = false
-    private var thumbsUpStartedAt: Date?
+    private var openPalmStartedAt: Date?
     private var isRunning = false
     /// Last good cursor position before a pinch started. Used to freeze the
     /// click location so it lands exactly where the user was pointing.
@@ -233,16 +233,16 @@ class HandTrackingManager: NSObject {
         // GESTURE 1: Grab (Closed Fist — all 4 curled + thumb folded)
         let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
 
-        // GESTURE 2: Reset (Thumbs Up 👍 — thumb extended + all 4 curled)
-        let isThumbsUp = thumbExtended && isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled
+        // GESTURE 2: Reset (Open Palm ✋ — all 5 fingers extended flat facing camera)
+        let isOpenPalm = thumbExtended && indexExtended && middleExtended && !ringCurled && !littleCurled
 
         // GESTURE 3: Two-Finger Scroll ✌️ (Index + Middle extended, Ring + Little curled)
         // Moving hand vertically in this mode scrolls web pages with smooth momentum.
-        let isTwoFingerScroll = indexExtended && middleExtended && ringCurled && littleCurled && !isFist
+        let isTwoFingerScroll = indexExtended && middleExtended && ringCurled && littleCurled && !isFist && !isOpenPalm
 
         // GESTURE 4: Single-Finger Point 👆 (Index extended, Middle curled or click cooldown)
         // Laser pointer is active only in this mode, preventing accidental clicks while scrolling.
-        let isPointing = (indexExtended && middleCurled && !isFist && !isTwoFingerScroll) || pinchCooldown
+        let isPointing = (indexExtended && middleCurled && !isFist && !isTwoFingerScroll && !isOpenPalm) || pinchCooldown
 
         // CLICK GESTURE (active only during Pointing):
         // Requires extreme closeness / true touching (distance < 0.038) to prevent false clicks with light gaps
@@ -283,23 +283,23 @@ class HandTrackingManager: NSObject {
             self.isGrabbing = isFist
             self.grabPosition = wristPos
 
-            // RESET COMMAND: Thumbs Up held for 1.5 seconds
-            if isThumbsUp {
-                if self.thumbsUpStartedAt == nil {
-                    self.thumbsUpStartedAt = Date()
+            // RESET COMMAND: Open Palm held for 2.0 seconds
+            if isOpenPalm {
+                if self.openPalmStartedAt == nil {
+                    self.openPalmStartedAt = Date()
                 }
             } else {
-                self.thumbsUpStartedAt = nil
+                self.openPalmStartedAt = nil
             }
 
-            let thumbsUpHeldLongEnough = self.thumbsUpStartedAt.map {
-                Date().timeIntervalSince($0) >= 1.5
+            let openPalmHeldLongEnough = self.openPalmStartedAt.map {
+                Date().timeIntervalSince($0) >= 2.0
             } ?? false
-            let resetRequested = thumbsUpHeldLongEnough && !self.resetCooldown
+            let resetRequested = openPalmHeldLongEnough && !self.resetCooldown
             if resetRequested {
                 self.resetCooldown = true
-                self.thumbsUpStartedAt = nil
-                AppLogger.shared.log("[HandTrackingManager] Thumbs-Up Reset triggered!")
+                self.openPalmStartedAt = nil
+                AppLogger.shared.log("[HandTrackingManager] Open Palm Reset triggered (2.0s hold)!")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     self.resetCooldown = false
                 }

@@ -700,17 +700,38 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     private func resetMonitorToHome() {
         guard let monitor = monitorNode else { return }
 
-        // Anchor the default panel in front of the user's current gaze, while
-        // keeping it upright rather than inheriting head pitch or roll.
-        let homeInHeadSpace = SCNVector3(0, 0.05, monitorDistance)
-        monitor.worldPosition = cameraRig.convertPosition(homeInHeadSpace, to: nil)
-        monitor.eulerAngles = SCNVector3(0, cameraRig.eulerAngles.y, 0)
+        // Compute true forward direction from cameraRig in world coordinates
+        let localForward = SCNVector3(0, 0, -1)
+        let worldForward = cameraRig.convertVector(localForward, to: nil)
+
+        // Flatten forward vector to horizontal XZ plane
+        var forwardXZ = simd_float2(worldForward.x, worldForward.z)
+        let len = simd_length(forwardXZ)
+        if len > 0.001 {
+            forwardXZ /= len
+        } else {
+            forwardXZ = simd_float2(0, -1)
+        }
+
+        // Place monitor exactly 2.0m directly ahead of current eye position
+        let eyePos = cameraRig.worldPosition
+        monitor.worldPosition = SCNVector3(
+            eyePos.x + forwardXZ.x * 2.0,
+            eyePos.y + 0.05,
+            eyePos.z + forwardXZ.y * 2.0
+        )
+
+        // Rotate monitor to face user directly
+        let yaw = atan2(forwardXZ.x, forwardXZ.y)
+        monitor.eulerAngles = SCNVector3(0, Float.pi + yaw, 0)
         monitor.scale = SCNVector3(1, 1, 1)
 
         isCurrentlyGrabbing = false
         grabOffset = SCNVector3Zero
         grabStartPalmSpan = 0
         grabStartDistance = -monitorDistance
+
+        AppLogger.shared.log("[VREngine] Reset window centered at world pos: \(monitor.worldPosition)")
 
         // WebKit and ObservableObject changes belong to the main thread.
         DispatchQueue.main.async { [weak self, weak monitor] in
