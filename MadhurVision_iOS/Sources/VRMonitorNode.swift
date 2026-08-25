@@ -152,8 +152,10 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             }
             
             if let window = targetWindow {
-                // Place it far off-screen so it doesn't block the 2D UI, but keep alpha = 1.0 so snapshots are fully opaque!
-                self.webView.frame = CGRect(x: -9999, y: -9999, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
+                // Place it at (0,0) inside the window behind the VR views
+                // with alpha = 1.0 (so snapshots are fully opaque) and inserted at bottom (index 0)
+                // so WebKit keeps the 60 FPS hardware video decoding engine active at full speed!
+                self.webView.frame = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
                 self.webView.isUserInteractionEnabled = false
                 self.webView.alpha = 1.0 
                 window.insertSubview(self.webView, at: 0)
@@ -186,7 +188,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         
         let config = WKSnapshotConfiguration()
         config.rect = webView.bounds
-        config.afterScreenUpdates = false
+        config.afterScreenUpdates = true
         
         webView.takeSnapshot(with: config) { [weak self] image, error in
             guard let self = self else { return }
@@ -242,16 +244,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                         inputEl.focus();
                         var kb = document.getElementById('vr-air-keyboard');
                         if(kb) kb.classList.add('visible');
-                    }
-                    
-                    // Auto-start video playback when clicking on video or player
-                    var v = document.querySelector('video');
-                    if(v && v.paused) {
-                        v.play().catch(function(){});
-                    }
-                    var playBtn = document.querySelector('.ytp-play-button, .ytp-large-play-button');
-                    if(playBtn && el.closest('.html5-video-player, ytd-watch-flexy, #movie_player')) {
-                        playBtn.click();
                     }
                 }
             })();
@@ -543,75 +535,20 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         """
     }
 
-    // MARK: - Video Playback Enforcer & Canvas Blitter JS
+    // MARK: - Video Playback Helper JS
     
     private static func videoPlaybackHelperJS() -> String {
         return """
         (function() {
-            function unlockAllVideos() {
+            // Ensure inline video playback flags on all video elements
+            function enforceInlineVideos() {
                 var videos = document.querySelectorAll('video');
                 videos.forEach(function(v) {
-                    v.setAttribute('playsinline', 'true');
-                    v.setAttribute('webkit-playsinline', 'true');
-                    // On YouTube watch page, trigger playback if paused
-                    if (v.paused && (window.location.hostname.indexOf('youtube.com') !== -1 || window.location.pathname.indexOf('watch') !== -1)) {
-                        v.play().catch(function(){});
-                    }
+                    if (!v.hasAttribute('playsinline')) v.setAttribute('playsinline', 'true');
+                    if (!v.hasAttribute('webkit-playsinline')) v.setAttribute('webkit-playsinline', 'true');
                 });
             }
-            setInterval(unlockAllVideos, 600);
-            
-            // Canvas Video Blitter: renders live video frames onto a 2D canvas
-            // so WKWebView.takeSnapshot captures full-color video frames instead of black boxes
-            var videoCanvas = null;
-            var canvasCtx = null;
-            
-            function renderVideoFrameToCanvas() {
-                var v = document.querySelector('video');
-                if (v && !v.paused && v.readyState >= 2) {
-                    if (!videoCanvas) {
-                        videoCanvas = document.createElement('canvas');
-                        videoCanvas.id = 'vr-video-canvas';
-                        videoCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
-                        if (v.parentElement) {
-                            v.parentElement.style.position = 'relative';
-                            v.parentElement.appendChild(videoCanvas);
-                        }
-                    }
-                    var vw = v.videoWidth || 1280;
-                    var vh = v.videoHeight || 720;
-                    if (videoCanvas.width !== vw || videoCanvas.height !== vh) {
-                        videoCanvas.width = vw;
-                        videoCanvas.height = vh;
-                        canvasCtx = videoCanvas.getContext('2d');
-                    }
-                    if (canvasCtx) {
-                        try {
-                            canvasCtx.drawImage(v, 0, 0, videoCanvas.width, videoCanvas.height);
-                        } catch(e) {}
-                    }
-                }
-                requestAnimationFrame(renderVideoFrameToCanvas);
-            }
-            requestAnimationFrame(renderVideoFrameToCanvas);
-            
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(function() {
-                    var playBtn = document.querySelector('.ytp-play-button, .ytp-large-play-button');
-                    if (playBtn) playBtn.click();
-                }, 800);
-            });
-            
-            document.addEventListener('click', function() {
-                setTimeout(function() {
-                    var v = document.querySelector('video');
-                    if (v && v.paused) {
-                        v.play().catch(function(){});
-                    }
-                    var playBtn = document.querySelector('.ytp-play-button, .ytp-large-play-button');
-                    if (playBtn) playBtn.click();
-                }, 300);
-            }, true);
+            setInterval(enforceInlineVideos, 1000);
         })();
         """
     }
