@@ -551,15 +551,35 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     private static func videoPlaybackHelperJS() -> String {
         return """
         (function() {
-            // Ensure inline video playback flags on all video elements
-            function enforceInlineVideos() {
+            function enforceInlineAndPlay() {
                 var videos = document.querySelectorAll('video');
                 videos.forEach(function(v) {
-                    if (!v.hasAttribute('playsinline')) v.setAttribute('playsinline', 'true');
-                    if (!v.hasAttribute('webkit-playsinline')) v.setAttribute('webkit-playsinline', 'true');
+                    v.setAttribute('playsinline', 'true');
+                    v.setAttribute('webkit-playsinline', 'true');
+                    v.removeAttribute('controlslist');
+                    if (v.paused && !v.ended && v.readyState >= 1) {
+                        var p = v.play();
+                        if (p !== undefined) {
+                            p.catch(function(e) {});
+                        }
+                    }
+                });
+                
+                var ytpPlay = document.querySelector('.ytp-large-play-button, .player-controls-middle button');
+                if (ytpPlay && ytpPlay.offsetParent !== null) {
+                    ytpPlay.click();
+                }
+            }
+            setInterval(enforceInlineAndPlay, 800);
+            
+            function wakeAudioAndVideo() {
+                var videos = document.querySelectorAll('video');
+                videos.forEach(function(v) {
+                    if (v.paused) v.play().catch(function(){});
                 });
             }
-            setInterval(enforceInlineVideos, 1000);
+            document.addEventListener('click', wakeAudioAndVideo, true);
+            document.addEventListener('touchend', wakeAudioAndVideo, true);
         })();
         """
     }

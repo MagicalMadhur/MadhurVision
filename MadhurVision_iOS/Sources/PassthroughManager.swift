@@ -35,17 +35,18 @@ class PassthroughManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
         
         let authStatus = AVCaptureDevice.authorizationStatus(for: .video)
         AppLogger.shared.log("[PassthroughManager] Camera Authorization Status: \(authStatus.rawValue)")
-        // Configure Audio Session to mix with web video audio without interrupting
+        // Configure Audio Session for background video & system audio playback
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetooth])
+            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
             try audioSession.setActive(true)
-            AppLogger.shared.log("[PassthroughManager] AudioSession configured with mixWithOthers")
+            AppLogger.shared.log("[PassthroughManager] AudioSession configured with playback + mixWithOthers")
         } catch {
             AppLogger.shared.log("[PassthroughManager] AudioSession warning: \(error.localizedDescription)")
         }
         
         isConfigured = true
+        captureSession.automaticallyConfiguresApplicationAudioSession = false
         captureSession.beginConfiguration()
         captureSession.sessionPreset = .hd1280x720
 
