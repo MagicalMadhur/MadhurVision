@@ -171,14 +171,13 @@ class HandTrackingManager: NSObject {
         let littleTip = try? observation.recognizedPoint(.littleTip)
         let littleMCP = try? observation.recognizedPoint(.littleMCP)
 
-        // Use a blend of index tip and PIP (middle knuckle) for cursor position.
-        // The PIP barely moves during a pinch, making the cursor far more stable.
-        // 60% PIP + 40% tip gives a good balance of stability and responsiveness.
-        let stableX = indexPIP.location.x * 0.6 + indexTip.location.x * 0.4
-        let stableY = indexPIP.location.y * 0.6 + indexTip.location.y * 0.4
-        let indexPos = CGPoint(x: stableX, y: 1.0 - stableY)
+        // Use raw index tip for cursor — most accurate for where the user is pointing.
+        let indexPos = CGPoint(x: indexTip.location.x,
+                               y: 1.0 - indexTip.location.y)
         let thumbPos = CGPoint(x: thumbTip.location.x,
                                y: 1.0 - thumbTip.location.y)
+        let middlePos = CGPoint(x: middleTip.location.x,
+                                y: 1.0 - middleTip.location.y)
 
         func distance(_ first: VNRecognizedPoint, _ second: VNRecognizedPoint) -> CGFloat {
             hypot(first.location.x - second.location.x, first.location.y - second.location.y)
@@ -205,8 +204,6 @@ class HandTrackingManager: NSObject {
         let thumbExtended: Bool
         if let littleTip, let littleMCP {
             littleCurled = isCurled(littleTip, littleMCP)
-            // Normalize the thumb position by the palm width so a thumbs-up
-            // or open thumb cannot count as a closed fist.
             let palmWidth = max(distance(indexMCP, littleMCP), 0.01)
             thumbFolded = distance(thumbTip, indexMCP) <= palmWidth * 1.5
             thumbExtended = distance(thumbTip, wrist) > palmWidth * 1.2
@@ -216,35 +213,32 @@ class HandTrackingManager: NSObject {
             thumbExtended = false
         }
 
-        // A window grab needs a real closed fist. A partly open hand, an
-        // incomplete pinch, or a sideways point cannot satisfy this test.
+        // A window grab needs a real closed fist.
         let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
 
-        // Index extension is the only requirement for pointing. Do not gate
-        // it on the other fingers: their confidence drops first when a hand
-        // is sideways, which previously made the cursor disappear.
-        // During pinch cooldown, keep isPointing true so the cursor stays visible.
+        // Index extension is the only requirement for pointing.
+        // During click cooldown, keep isPointing true so the cursor stays visible.
         let isPointing = (indexExtended && !isFist) || pinchCooldown
 
         // RESET GESTURE: Thumbs Up 👍 (thumb extended + all 4 fingers curled).
-        // This is a unique gesture that cannot overlap with pointing (index
-        // extended) or grabbing (thumb folded into fist).
         let isThumbsUp = thumbExtended && isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled
 
-        // Pinch detection: use raw thumb-to-index-tip distance.
-        // The pinch is detected while pointing, before the finger fully bends.
-        let pinchDist = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
-        let pinchDetected = isPointing && !pinchCooldown && pinchDist < 0.06
+        // CLICK GESTURE: 
+        // 1. Thumb touches MIDDLE finger (best: index finger stays pointed perfectly at target without moving)
+        // 2. OR classic pinch (thumb touches index finger)
+        let thumbMiddleDist = hypot(thumbPos.x - middlePos.x, thumbPos.y - middlePos.y)
+        let thumbIndexDist = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
+        let clickDetected = isPointing && !pinchCooldown && (thumbMiddleDist < 0.065 || thumbIndexDist < 0.055)
 
         let wristPos = CGPoint(x: wrist.location.x, y: 1.0 - wrist.location.y)
         let palmSpan = distance(indexMCP, wrist)
 
         // When pointing normally, continuously update lastGoodCursorPosition.
-        // When a pinch is detected, freeze at this position so the click
+        // When a click is detected, freeze at this position so the click
         // lands exactly where the user was aiming.
         let cursorPosition: CGPoint
         if pinchCooldown {
-            // During pinch cooldown, keep cursor frozen at last good position
+            // During click cooldown, keep cursor frozen at last good position
             cursorPosition = lastGoodCursorPosition
         } else if isPointing {
             lastGoodCursorPosition = indexPos
@@ -289,8 +283,8 @@ class HandTrackingManager: NSObject {
                 }
             }
 
-            // PINCH CLICK: fire click at the frozen cursor position
-            if pinchDetected && !self.pinchCooldown && !isFist {
+            // CLICK: fire click at the frozen cursor position
+            if clickDetected && !self.pinchCooldown && !isFist {
                 self.isPinching = true
                 self.pinchCooldown = true
                 
@@ -310,7 +304,7 @@ class HandTrackingManager: NSObject {
                 
                 // Keep the cooldown longer so we don't rapid-fire clicks.
                 // During this time cursor stays frozen and visible.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                     self.pinchCooldown = false
                 }
             }

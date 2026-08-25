@@ -45,25 +45,48 @@ class HandCursorNode: SCNNode {
     }
 
     private func createPointerImage() -> UIImage {
-        let size = CGSize(width: 128, height: 160)
+        let size = CGSize(width: 160, height: 200)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { context in
             let path = UIBezierPath()
-            path.move(to: CGPoint(x: 12, y: 10))
-            path.addLine(to: CGPoint(x: 12, y: 116))
-            path.addLine(to: CGPoint(x: 42, y: 86))
-            path.addLine(to: CGPoint(x: 67, y: 145))
-            path.addLine(to: CGPoint(x: 88, y: 136))
-            path.addLine(to: CGPoint(x: 63, y: 77))
-            path.addLine(to: CGPoint(x: 112, y: 77))
+            path.move(to: CGPoint(x: 20, y: 12))
+            path.addLine(to: CGPoint(x: 20, y: 148))
+            path.addLine(to: CGPoint(x: 54, y: 110))
+            path.addLine(to: CGPoint(x: 84, y: 182))
+            path.addLine(to: CGPoint(x: 110, y: 170))
+            path.addLine(to: CGPoint(x: 80, y: 98))
+            path.addLine(to: CGPoint(x: 140, y: 98))
             path.close()
 
-            context.cgContext.setFillColor(UIColor.white.cgColor)
+            // 1. Drop shadow (dark, offset down-right)
+            context.cgContext.saveGState()
+            context.cgContext.setShadow(
+                offset: CGSize(width: 4, height: 6),
+                blur: 10,
+                color: UIColor(white: 0, alpha: 0.8).cgColor
+            )
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.addPath(path.cgPath)
+            context.cgContext.fillPath()
+            context.cgContext.restoreGState()
+
+            // 2. Thick black outline (drawn first, behind the white fill)
             context.cgContext.setStrokeColor(UIColor.black.cgColor)
-            context.cgContext.setLineWidth(9)
+            context.cgContext.setLineWidth(14)
             context.cgContext.setLineJoin(.round)
             context.cgContext.addPath(path.cgPath)
-            context.cgContext.drawPath(using: .fillStroke)
+            context.cgContext.strokePath()
+
+            // 3. White fill
+            context.cgContext.setFillColor(UIColor.white.cgColor)
+            context.cgContext.addPath(path.cgPath)
+            context.cgContext.fillPath()
+
+            // 4. Thin cyan inner border for style
+            context.cgContext.setStrokeColor(UIColor(red: 0, green: 0.83, blue: 1.0, alpha: 0.5).cgColor)
+            context.cgContext.setLineWidth(2)
+            context.cgContext.addPath(path.cgPath)
+            context.cgContext.strokePath()
         }
     }
 
@@ -89,11 +112,11 @@ class HandCursorNode: SCNNode {
             return
         }
 
-        // Extremely aggressive low-pass filter (0.05) to eliminate all jitter
+        // Responsive filter — smooths micro-jitter without sluggish tracking delay
         if smoothedFingerPos == nil {
             smoothedFingerPos = fingerPos
         } else {
-            let alpha: CGFloat = 0.05
+            let alpha: CGFloat = 0.20
             let current = smoothedFingerPos!
             smoothedFingerPos = CGPoint(
                 x: current.x + (fingerPos.x - current.x) * alpha,
@@ -138,9 +161,10 @@ class HandCursorNode: SCNNode {
                 hit.worldCoordinates.z + normal.z * 0.008
             )
             
-            // Only fire click once per pinch (rising edge trigger)
+            // Only fire click once per pinch/click (rising edge trigger)
             if isPinching && !previousIsPinching {
                 onClick?(hit)
+                animateClick()
             }
             
             // The engine validates the target and forwards the WebKit call to
@@ -157,5 +181,14 @@ class HandCursorNode: SCNNode {
         }
         
         previousIsPinching = isPinching
+    }
+
+    private func animateClick() {
+        let pulse = SCNAction.sequence([
+            SCNAction.scale(to: 0.7, duration: 0.06),
+            SCNAction.scale(to: 1.15, duration: 0.08),
+            SCNAction.scale(to: 1.0, duration: 0.08)
+        ])
+        dotNode.runAction(pulse)
     }
 }
