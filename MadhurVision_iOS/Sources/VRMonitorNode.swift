@@ -1042,7 +1042,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 <div id="top-bar">
                     <div class="top-title" id="app-title">Home</div>
                     <div class="top-spacer"></div>
-                    <div class="top-badge">120 Hz Standalone</div>
+                    <div class="top-badge" style="background:rgba(123,47,247,0.2); border-color:#a259ff; color:#d09cf7;">🎮 Wand: http://\(AirMouseServer.shared.getLocalIPAddress()):8080</div>
+                    <div class="top-badge">120 Hz VR</div>
                     <div class="top-clock" id="clock">12:00</div>
                 </div>
                 

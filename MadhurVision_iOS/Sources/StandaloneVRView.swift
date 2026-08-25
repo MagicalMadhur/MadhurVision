@@ -175,6 +175,7 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     private struct PendingSceneInput {
         var hand: HandTrackingInput?
         var mouse: MouseTrackingInput?
+        var controller: ControllerMotionInput?
         var headRotation: SCNVector3?
         var monitorScale: Float?
         var ipd: Float?
@@ -185,7 +186,7 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         var resetMonitor = false
 
         var hasWork: Bool {
-            hand != nil || mouse != nil || headRotation != nil || monitorScale != nil ||
+            hand != nil || mouse != nil || controller != nil || headRotation != nil || monitorScale != nil ||
             ipd != nil || shouldRecalibrate || passthroughBackground != nil ||
             directTap != nil || monitorImage != nil || resetMonitor
         }
@@ -242,6 +243,7 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         monitorNode?.cleanup()
         PassthroughManager.shared.stop()
         HandTrackingManager.shared.stop()
+        AirMouseServer.shared.stop()
         cancellables.removeAll()
 
         pendingInputLock.lock()
@@ -468,9 +470,19 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     private func startTracking() {
         HandTrackingManager.shared.start()
         MouseTrackingManager.shared.start()
+        AirMouseServer.shared.start()
         
         let ht = HandTrackingManager.shared
         let mt = MouseTrackingManager.shared
+        
+        AirMouseServer.shared.onControllerInput = { [weak self] input in
+            self?.enqueueSceneInput {
+                $0.controller = input
+                if input.resetRequested {
+                    $0.resetMonitor = true
+                }
+            }
+        }
         
         // Publishers only enqueue value data. They never read or mutate a
         // SceneKit node because the two eye renderers can be active here.
@@ -506,6 +518,7 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     // State latched for 120Hz continuous evaluation
     private var latestHandInput: HandTrackingInput?
     private var latestMouseInput: MouseTrackingInput?
+    private var latestControllerInput: ControllerMotionInput?
 
     /// Both eyes can call this, but a lock ensures one render callback at a
     /// time consumes and applies the queued scene work.
@@ -517,6 +530,7 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         
         if let h = input.hand { latestHandInput = h }
         if let m = input.mouse { latestMouseInput = m }
+        if let c = input.controller { latestControllerInput = c }
 
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0
@@ -557,7 +571,11 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
 
         if input.resetMonitor {
             resetMonitorToHome()
+        } else if AirMouseServer.shared.isControllerActive, let controller = latestControllerInput {
+            // Wireless Air Controller is actively transmitting (Priority Mode)
+            applyControllerInput(controller)
         } else if let hand = latestHandInput {
+            // Automatic Fallback to Apple Vision Camera Hand Tracking
             applyHandInput(hand)
         }
 
@@ -655,6 +673,27 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
             scene: scene,
             isPinching: input.isPinching,
             scrollDelta: input.scrollDelta
+        )
+    }
+
+    private func applyControllerInput(_ input: ControllerMotionInput) {
+        isCurrentlyGrabbing = false
+        grabOffset = SCNVector3Zero
+
+        // Map controller (yaw, pitch) directly to normalized screen coordinate space
+        let screenX = CGFloat(input.yaw * 0.5 + 0.5)
+        let screenY = CGFloat(input.pitch * 0.5 + 0.5)
+        let fingerPos = CGPoint(
+            x: max(0.0, min(1.0, screenX)),
+            y: max(0.0, min(1.0, screenY))
+        )
+
+        handCursor?.update(
+            fingerPos: fingerPos,
+            cameraNode: leftCameraNode,
+            scene: scene,
+            isPinching: input.isClicking,
+            scrollDelta: CGFloat(input.scrollDelta)
         )
     }
 
