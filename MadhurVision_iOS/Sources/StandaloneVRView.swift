@@ -40,25 +40,27 @@ class DualEyeContainerView: UIView {
     let leftView: SCNView
     let rightView: SCNView
     
-    // Two display layers consume the same capture session. CAReplicatorLayer
-    // is unreliable with AVCaptureVideoPreviewLayer on some devices, where it
-    // can display only its replicated (right-eye) instance.
-    private let leftCameraPreview: AVCaptureVideoPreviewLayer
-    private let rightCameraPreview: AVCaptureVideoPreviewLayer
+    // iOS only supports ONE AVCaptureVideoPreviewLayer per AVCaptureSession.
+    // Creating two silently disconnects the first. Instead we use a single
+    // preview layer inside a CAReplicatorLayer that mirrors it for the right eye.
+    private let cameraPreview: AVCaptureVideoPreviewLayer
+    private let replicatorLayer = CAReplicatorLayer()
     
     init(leftView: SCNView, rightView: SCNView) {
         self.leftView = leftView
         self.rightView = rightView
         
-        leftCameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
-        rightCameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
-        leftCameraPreview.videoGravity = .resizeAspectFill
-        rightCameraPreview.videoGravity = .resizeAspectFill
+        cameraPreview = AVCaptureVideoPreviewLayer(session: PassthroughManager.shared.captureSession)
+        cameraPreview.videoGravity = .resizeAspectFill
         
         super.init(frame: .zero)
         self.backgroundColor = .black
-        self.layer.addSublayer(leftCameraPreview)
-        self.layer.addSublayer(rightCameraPreview)
+        
+        // Replicator creates 2 copies side by side (left eye = original, right eye = replica)
+        replicatorLayer.instanceCount = 2
+        replicatorLayer.preservesDepth = true
+        replicatorLayer.addSublayer(cameraPreview)
+        self.layer.addSublayer(replicatorLayer)
         
         self.addSubview(leftView)
         self.addSubview(rightView)
@@ -72,17 +74,17 @@ class DualEyeContainerView: UIView {
         let orientation = UIApplication.shared.windows.first?.windowScene?.interfaceOrientation ?? .landscapeRight
         let avOrientation: AVCaptureVideoOrientation = (orientation == .landscapeLeft) ? .landscapeLeft : .landscapeRight
         
-        for preview in [leftCameraPreview, rightCameraPreview] {
-            if let connection = preview.connection, connection.isVideoOrientationSupported {
-                connection.videoOrientation = avOrientation
-            }
+        if let connection = cameraPreview.connection, connection.isVideoOrientationSupported {
+            connection.videoOrientation = avOrientation
         }
         PassthroughManager.shared.updateOrientation(avOrientation)
         
         let halfWidth = bounds.width / 2.0
         
-        leftCameraPreview.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
-        rightCameraPreview.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
+        // The replicator spans the full screen; each instance is halfWidth wide.
+        replicatorLayer.frame = bounds
+        replicatorLayer.instanceTransform = CATransform3DMakeTranslation(halfWidth, 0, 0)
+        cameraPreview.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
         
         leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
         rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
