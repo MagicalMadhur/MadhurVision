@@ -129,8 +129,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         webView.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
         webView.navigationDelegate = self
         
-        // Desktop Mac User Agent (serves clean HTML5 inline video without restrictive DRM errors, and enables autoplay)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+        // Modern iPad Safari User Agent (standard iOS browser environment with full H.264 hardware decoding & inline playback)
+        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
         
         // Load OS HTML
         let osHTML = VRMonitorNode.generateOSHTML()
@@ -176,8 +176,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             self?.requestSnapshot()
         }
         
-        // Periodic snapshot timer (12 FPS)
-        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
+        // Periodic snapshot timer (24 FPS for smooth video playback)
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 24.0, repeats: true) { [weak self] _ in
             self?.requestSnapshot()
         }
     }
@@ -188,7 +188,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         
         let config = WKSnapshotConfiguration()
         config.rect = webView.bounds
-        config.afterScreenUpdates = true
+        config.afterScreenUpdates = false
         
         webView.takeSnapshot(with: config) { [weak self] image, error in
             guard let self = self else { return }
@@ -223,6 +223,23 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     requestAnimationFrame(function(){ dot.style.transform = 'scale(2.2)'; dot.style.opacity = '0'; });
                     setTimeout(function(){ dot.remove(); }, 380);
                     
+                    // 1. Touch Events (Unlocks iOS WebKit media autoplay permissions)
+                    try {
+                        var touchObj = new Touch({
+                            identifier: Date.now(),
+                            target: el,
+                            clientX: cssX,
+                            clientY: cssY,
+                            screenX: cssX,
+                            screenY: cssY,
+                            pageX: cssX + window.pageXOffset,
+                            pageY: cssY + window.pageYOffset
+                        });
+                        el.dispatchEvent(new TouchEvent('touchstart', { cancelable: true, bubbles: true, touches: [touchObj], targetTouches: [touchObj], changedTouches: [touchObj] }));
+                        el.dispatchEvent(new TouchEvent('touchend', { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [touchObj] }));
+                    } catch(te) {}
+
+                    // 2. Pointer & Mouse Events
                     var opts = {bubbles:true, cancelable:true, view:window, clientX:cssX, clientY:cssY, screenX:cssX, screenY:cssY};
                     el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({}, opts, {pointerType:'touch'})));
                     el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, opts, {pointerType:'touch'})));
@@ -230,7 +247,8 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     el.dispatchEvent(new MouseEvent('mouseup', opts));
                     el.dispatchEvent(new MouseEvent('click', opts));
                     
-                    var clickable = el.closest('a, button, input, textarea, [role="button"], .card, .dock-item, .nav-btn, .vfd-btn, ytd-thumbnail, ytd-rich-item-renderer, ytd-compact-video-renderer, ytd-video-renderer, yt-img-shadow, .media-item-thumbnail-container, .ytp-play-button, .ytp-large-play-button');
+                    // 3. Clickable Navigation & YouTube Play Button Handling
+                    var clickable = el.closest('a, button, input, textarea, [role="button"], .card, .dock-item, .nav-btn, .vfd-btn, ytd-thumbnail, ytd-rich-item-renderer, ytd-compact-video-renderer, ytd-video-renderer, yt-img-shadow, .media-item-thumbnail-container, .ytp-play-button, .ytp-large-play-button, .player-control-play-pause-icon');
                     if(clickable) {
                         if(typeof clickable.click === 'function') clickable.click();
                         var link = clickable.closest('a') || clickable.querySelector('a');
@@ -239,7 +257,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                         el.click();
                     }
                     
-                    // Suppress native iOS mobile software keyboard and open VR Air Keyboard
+                    // 4. Suppress native iOS mobile software keyboard and open VR Air Keyboard
                     var inputEl = el.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], #search, #search-input, ytd-searchbox, form#search-form, [aria-label*="Search" i], [placeholder*="Search" i]') || el.querySelector('input, textarea');
                     if(inputEl) {
                         var actualInput = (inputEl.tagName === 'INPUT' || inputEl.tagName === 'TEXTAREA') ? inputEl : (inputEl.querySelector('input, textarea') || inputEl);
@@ -557,71 +575,43 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     v.setAttribute('playsinline', 'true');
                     v.setAttribute('webkit-playsinline', 'true');
                     v.removeAttribute('controlslist');
+                    v.muted = false;
                     
-                    // WKWebView Canvas Hack: WKWebView's takeSnapshot cannot capture hardware accelerated video layers.
-                    // We must draw the video onto a canvas overlay manually!
-                    if (!v.dataset.canvasInjected) {
-                        v.dataset.canvasInjected = "true";
-                        
-                        var canvas = document.createElement('canvas');
-                        canvas.style.position = 'absolute';
-                        canvas.style.top = '0';
-                        canvas.style.left = '0';
-                        canvas.style.width = '100%';
-                        canvas.style.height = '100%';
-                        canvas.style.pointerEvents = 'none'; // let clicks pass through
-                        canvas.style.zIndex = '999';
-                        
-                        if (v.parentNode) {
-                            // Ensure parent is positioned to hold absolute canvas
-                            if (window.getComputedStyle(v.parentNode).position === 'static') {
-                                v.parentNode.style.position = 'relative';
-                            }
-                            v.parentNode.insertBefore(canvas, v.nextSibling);
-                        }
-                        
-                        var ctx = canvas.getContext('2d', { alpha: false });
-                        
-                        function renderFrame() {
-                            if (!v.paused && !v.ended && v.readyState >= 2 && v.videoWidth > 0) {
-                                if (canvas.width !== v.videoWidth) {
-                                    canvas.width = v.videoWidth;
-                                    canvas.height = v.videoHeight;
-                                }
-                                ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-                            }
-                            requestAnimationFrame(renderFrame);
-                        }
-                        requestAnimationFrame(renderFrame);
-                        
-                        // Make original video transparent so the canvas shows through, but keep opacity > 0 so it stays active
-                        v.style.opacity = '0.01';
-                    }
-
                     if (v.paused && !v.ended && v.readyState >= 1) {
                         var p = v.play();
                         if (p !== undefined) {
-                            p.catch(function(e) {});
+                            p.catch(function(e) {
+                                // Fallback: play muted if unmuted autoplay is rejected by site
+                                v.muted = true;
+                                v.play().then(function() { v.muted = false; }).catch(function(){});
+                            });
                         }
                     }
                 });
                 
-                // Try clicking YouTube play buttons automatically
-                var ytpPlay = document.querySelector('.ytp-large-play-button, .player-controls-middle button');
+                // Auto-click YouTube play & unmute buttons
+                var unmuteBtn = document.querySelector('.ytp-unmute, .ytp-unmute-inner, button[aria-label*="Unmute" i]');
+                if (unmuteBtn && unmuteBtn.offsetParent !== null) {
+                    unmuteBtn.click();
+                }
+                
+                var ytpPlay = document.querySelector('.ytp-large-play-button, .player-controls-middle button, .player-control-play-pause-icon');
                 if (ytpPlay && ytpPlay.offsetParent !== null) {
                     ytpPlay.click();
                 }
             }
-            setInterval(enforceInlineAndPlay, 800);
+            setInterval(enforceInlineAndPlay, 600);
             
             function wakeAudioAndVideo() {
                 var videos = document.querySelectorAll('video');
                 videos.forEach(function(v) {
+                    v.muted = false;
                     if (v.paused) v.play().catch(function(){});
                 });
             }
             document.addEventListener('click', wakeAudioAndVideo, true);
             document.addEventListener('touchend', wakeAudioAndVideo, true);
+            document.addEventListener('pointerup', wakeAudioAndVideo, true);
         })();
         """
     }

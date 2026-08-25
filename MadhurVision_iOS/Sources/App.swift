@@ -1,10 +1,21 @@
 import SwiftUI
 import Combine
+import AVFoundation
 
 @main
 struct MadhurVisionApp: App {
     init() {
         AppLogger.shared.setupCrashHandlers()
+        
+        // Global Audio Session Configuration for HTML5 & YouTube playback
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers, .allowAirPlay, .defaultToSpeaker])
+            try audioSession.setActive(true)
+            AppLogger.shared.log("[App] Global AVAudioSession active with .playback & .moviePlayback")
+        } catch {
+            AppLogger.shared.log("[App] AVAudioSession init warning: \(error.localizedDescription)")
+        }
     }
     
     var body: some Scene {
