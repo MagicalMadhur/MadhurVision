@@ -236,8 +236,8 @@ class HandTrackingManager: NSObject {
         // Hand Chirality (Left vs Right Hand)
         let isLeftHand = (observation.chirality == .left) || (observation.chirality == .unknown && (thumbTip?.location.x ?? 0) > indexMCP.location.x)
 
-        // GESTURE 1: Grab (Closed Fist — all 4 curled + thumb folded)
-        let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
+        // GESTURE 1: Grab (Closed Fist — ONLY for LEFT HAND)
+        let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded && isLeftHand
 
         // GESTURE 2: Reset (Open Palm ✋ — ONLY for LEFT HAND held flat facing camera)
         let isLeftOpenPalm = indexExtended && middleExtended && ringExtended && isLeftHand
