@@ -285,7 +285,7 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     func recalibrateView() {
         referenceAttitude = nil
         enqueueSceneInput { $0.shouldRecalibrate = true }
-        monitorNode?.requestSnapshot()
+        monitorNode?.renderCurrentState()
     }
     
     // MARK: - Direct Screen Taps (Fallback)

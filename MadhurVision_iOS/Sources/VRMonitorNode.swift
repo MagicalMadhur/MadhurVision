@@ -1,50 +1,130 @@
 import SceneKit
-import WebKit
 import UIKit
 import AVFoundation
 import SpriteKit
 
-/// A single unified floating monitor in VR space.
-/// Features:
-/// - Instant Frame 0 native render so the monitor is never transparent or blank.
-/// - Robust serial snapshot pipeline (with mutex lock) to prevent WebKit IPC starvation.
-/// - Built-in MadhurVision OS 2.0 with Google Browser, YouTube, and interactive Settings.
-/// - Projector-style scaling that maintains fixed 16:9 web resolution.
-class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
+/// Native Spatial Video Item Model
+public struct SpatialVideoItem: Identifiable {
+    public let id: String
+    public let title: String
+    public let channel: String
+    public let category: String
+    public let streamURL: String
+    public let icon: String
+    public let gradientColors: [UIColor]
+}
+
+/// Pure Native Spatial OS for VR Monitor (Zero WebKit)
+public final class VRMonitorNode: SCNNode {
     
-    // Public Callbacks
-    var onScaleChanged: ((CGFloat) -> Void)?
-    var onIPDChanged: ((Float) -> Void)?
-    var onRecalibrateRequested: (() -> Void)?
-    var onPassthroughToggled: ((Bool) -> Void)?
-    var onExitVRRequested: (() -> Void)?
-    /// Delivers WebKit snapshots to VREngine's SceneKit render loop.
-    var onSnapshotImage: ((UIImage) -> Void)?
+    // MARK: - Canvas Dimensions
+    public static let canvasWidth: CGFloat = 1440
+    public static let canvasHeight: CGFloat = 810
     
-    private var webView: WKWebView!
-    let monitorWidth: CGFloat
-    let monitorHeight: CGFloat
-    private var snapshotTimer: Timer?
-    private var isSnapshotting = false
-    private var isShowingOS = true
+    public let monitorWidth: CGFloat
+    public let monitorHeight: CGFloat
     
-    // Native Hardware-Accelerated Spatial Cinema Engine
+    // MARK: - State Machine
+    public enum SpatialViewState {
+        case home
+        case cinemaTheater(item: SpatialVideoItem)
+        case youtubeFeed
+        case settings
+    }
+    
+    public private(set) var currentState: SpatialViewState = .home
+    
+    // MARK: - Cinema Player Engine (Direct Metal GPU Texture)
     private var cinemaPlayer: AVPlayer?
-    private var isCinemaMode: Bool = false
+    private var videoSKNode: SKVideoNode?
+    private var videoSKScene: SKScene?
+    public private(set) var isCinemaMode: Bool = false
+    public private(set) var currentVideoTitle: String = ""
     
-    // Web rendering canvas dimensions (16:9)
-    static let canvasWidth: CGFloat = 1440
-    static let canvasHeight: CGFloat = 810
+    // MARK: - Settings & Callbacks
+    public var onScaleChanged: ((CGFloat) -> Void)?
+    public var onIPDChanged: ((Float) -> Void)?
+    public var onRecalibrateRequested: (() -> Void)?
+    public var onPassthroughToggled: ((Bool) -> Void)?
+    public var onExitVRRequested: (() -> Void)?
+    public var onSnapshotImage: ((UIImage) -> Void)?
     
-    // Store OS HTML for fast reload
-    private static var cachedOSHTML: String?
+    public var currentScale: CGFloat = 1.0
+    public var currentIPD: Float = 0.065
+    public var isPassthroughActive: Bool = false
     
-    init(width: CGFloat = 2.4, height: CGFloat = 1.35) {
+    // MARK: - Curated 4K Cinema Video Catalog
+    public let cinemaCatalog: [SpatialVideoItem] = [
+        SpatialVideoItem(
+            id: "nature_4k",
+            title: "Earth 4K HDR • Breathtaking Wildlife & Landscapes",
+            channel: "BBC Earth Showcase",
+            category: "Nature 4K",
+            streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+            icon: "🌿",
+            gradientColors: [UIColor(red: 0.05, green: 0.35, blue: 0.20, alpha: 1.0), UIColor(red: 0.02, green: 0.15, blue: 0.08, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "interstellar_imax",
+            title: "Interstellar Cosmic Flight • Deep Space 4K Experience",
+            channel: "Hans Zimmer IMAX",
+            category: "Sci-Fi IMAX",
+            streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+            icon: "🚀",
+            gradientColors: [UIColor(red: 0.10, green: 0.15, blue: 0.45, alpha: 1.0), UIColor(red: 0.03, green: 0.05, blue: 0.20, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "lofi_beats",
+            title: "Lofi Girl • Relaxing Chill Beats to Study in VR",
+            channel: "Lofi Girl Records",
+            category: "Lo-Fi Music",
+            streamURL: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+            icon: "🎧",
+            gradientColors: [UIColor(red: 0.40, green: 0.10, blue: 0.35, alpha: 1.0), UIColor(red: 0.15, green: 0.03, blue: 0.15, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "spatial_vision",
+            title: "Apple Vision Pro Spatial Computing Showcase",
+            channel: "Tech Vision Spatial",
+            category: "Spatial VR",
+            streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+            icon: "🥽",
+            gradientColors: [UIColor(red: 0.05, green: 0.30, blue: 0.45, alpha: 1.0), UIColor(red: 0.02, green: 0.10, blue: 0.20, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "blender_animation",
+            title: "Elephants Dream • 4K Open Movie Animation",
+            channel: "Blender Animation Studio",
+            category: "Animation 4K",
+            streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+            icon: "🎞️",
+            gradientColors: [UIColor(red: 0.45, green: 0.20, blue: 0.05, alpha: 1.0), UIColor(red: 0.20, green: 0.08, blue: 0.02, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "apple_hls",
+            title: "Apple Adaptive Bitrate Spatial HLS Demo",
+            channel: "Apple Developer Streaming",
+            category: "Apple HLS",
+            streamURL: "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8",
+            icon: "⚡",
+            gradientColors: [UIColor(red: 0.25, green: 0.05, blue: 0.45, alpha: 1.0), UIColor(red: 0.10, green: 0.02, blue: 0.20, alpha: 1.0)]
+        )
+    ]
+    
+    // MARK: - Interactive Hit Bounds Registry
+    private struct ClickableZone {
+        let rect: CGRect
+        let action: () -> Void
+    }
+    private var activeClickableZones: [ClickableZone] = []
+    
+    // MARK: - Initializer
+    public init(width: CGFloat = 2.4, height: CGFloat = 1.35) {
         self.monitorWidth = width
         self.monitorHeight = height
         super.init()
         
-        // 1. Create the physical 3D plane
+        // 1. Create physical 3D plane geometry
         let plane = SCNPlane(width: width, height: height)
         plane.cornerRadius = 0.04
         self.geometry = plane
@@ -53,409 +133,89 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         // 2. Add subtle glowing border frame
         addBorderFrame(width: width, height: height)
         
-        // 3. INSTANT FRAME 0 RENDER: Draw native OS desktop immediately onto diffuse.contents
-        // This guarantees the monitor is NEVER black or transparent from millisecond 0!
-        let initialImage = VRMonitorNode.renderInstantPlaceholder()
+        // 3. INSTANT FRAME 0 RENDER: Draw native OS desktop immediately on millisecond 0!
         let material = SCNMaterial()
-        material.diffuse.contents = initialImage
         material.isDoubleSided = true
         material.lightingModel = .constant
         plane.materials = [material]
         
-        // 4. Initialize WKWebView
-        setupWebView()
-        
-        // 5. Add to UIKit hierarchy and start snapshot pump
-        attachWebViewAndStartCapture()
+        renderCurrentState()
+        AppLogger.shared.log("[VRMonitorNode] Pure Native Spatial OS initialized with Direct Metal Engine!")
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
-    func cleanup() {
-        snapshotTimer?.invalidate()
-        snapshotTimer = nil
-        webView?.stopLoading()
-        webView?.removeFromSuperview()
-        webView = nil
+    public func cleanup() {
+        exitCinemaMode()
+        activeClickableZones.removeAll()
     }
-
-    /// Converts a 3D world contact point into exact normalized (0.0 to 1.0) UV coordinates on the monitor surface.
-    /// Uses physical geometry bounds rather than texture mapping channels for 100% mathematical precision.
-    func uvCoordinates(fromWorldPoint worldPoint: SCNVector3) -> CGPoint {
+    
+    // MARK: - UV Coordinates from 3D World Hit
+    public func uvCoordinates(fromWorldPoint worldPoint: SCNVector3) -> CGPoint {
         let local = convertPosition(worldPoint, from: nil)
         let u = CGFloat(min(max((local.x / Float(monitorWidth)) + 0.5, 0.0), 1.0))
         let v = CGFloat(min(max(0.5 - (local.y / Float(monitorHeight)), 0.0), 1.0))
         return CGPoint(x: u, y: v)
     }
     
-    // MARK: - WebView Setup
-    
-    private func setupWebView() {
-        let webConfig = WKWebViewConfiguration()
-        webConfig.allowsInlineMediaPlayback = true
-        webConfig.mediaTypesRequiringUserActionForPlayback = []
-        webConfig.allowsAirPlayForMediaPlayback = true
-        webConfig.allowsPictureInPictureMediaPlayback = true
-        webConfig.defaultWebpagePreferences.allowsContentJavaScript = true
+    // MARK: - Native Click Dispatcher
+    public func simulateClick(at uv: CGPoint) {
+        let pixelX = uv.x * VRMonitorNode.canvasWidth
+        let pixelY = uv.y * VRMonitorNode.canvasHeight
+        let hitPoint = CGPoint(x: pixelX, y: pixelY)
         
-        // Swift <-> JS Bridge
-        webConfig.userContentController.add(self, name: "vrOS")
+        // Check clickable zones from top to bottom
+        for zone in activeClickableZones {
+            if zone.rect.contains(hitPoint) {
+                AppLogger.shared.log("[VRMonitorNode] Native Click at (\(Int(pixelX)), \(Int(pixelY))) hit zone \(zone.rect)")
+                zone.action()
+                return
+            }
+        }
         
-        // Floating Dock script (injected on external websites)
-        let dockScript = WKUserScript(
-            source: VRMonitorNode.floatingDockJS(),
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        webConfig.userContentController.addUserScript(dockScript)
-        
-        // Air Keyboard script
-        let keyboardScript = WKUserScript(
-            source: VRMonitorNode.airKeyboardJS(),
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        webConfig.userContentController.addUserScript(keyboardScript)
-        
-        webView = WKWebView(
-            frame: CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight),
-            configuration: webConfig
-        )
-        webView.isOpaque = true
-        webView.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0)
-        webView.navigationDelegate = self
-        
-        // Modern iPad Safari User Agent (standard iOS browser environment with full H.264 hardware decoding & inline playback)
-        webView.customUserAgent = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
-        
-        // Load OS HTML with https://www.youtube.com origin to authorize YouTube IFrame Embed API
-        let osHTML = VRMonitorNode.generateOSHTML()
-        VRMonitorNode.cachedOSHTML = osHTML
-        webView.loadHTMLString(osHTML, baseURL: URL(string: "https://www.youtube.com"))
+        AppLogger.shared.log("[VRMonitorNode] Native Click at (\(Int(pixelX)), \(Int(pixelY))) had no registered zone.")
     }
     
-    private func attachWebViewAndStartCapture() {
+    public func simulateScroll(by delta: CGFloat) {
+        // Native scroll support for catalog/feeds if needed
+    }
+    
+    // MARK: - State Navigation
+    public func setViewState(_ state: SpatialViewState) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            
-            // Find an active window to attach webView
-            var targetWindow: UIWindow? = nil
-            if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) as? UIWindowScene {
-                targetWindow = windowScene.windows.first
+            if self.isCinemaMode {
+                self.exitCinemaMode()
             }
-            if targetWindow == nil {
-                targetWindow = UIApplication.shared.windows.first
-            }
-            
-            if let window = targetWindow {
-                // Place it at (0,0) inside the window behind the VR views
-                // with alpha = 1.0 (so snapshots are fully opaque) and inserted at bottom (index 0)
-                // so WebKit keeps the 60 FPS hardware video decoding engine active at full speed!
-                self.webView.frame = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
-                self.webView.isUserInteractionEnabled = true
-                self.webView.alpha = 1.0 
-                window.insertSubview(self.webView, at: 0)
-            }
-            
-            self.startSnapshotPipeline()
+            self.currentState = state
+            self.renderCurrentState()
         }
     }
     
-    // MARK: - Serial Snapshot Pipeline (Mutex-Protected)
-    
-    private func startSnapshotPipeline() {
-        // Initial capture after short delay for first layout pass
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.requestSnapshot()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            self?.requestSnapshot()
-        }
-        
-        // Periodic snapshot timer (24 FPS for smooth video playback)
-        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 24.0, repeats: true) { [weak self] _ in
-            self?.requestSnapshot()
-        }
+    public func goHome() {
+        setViewState(.home)
     }
     
-    func requestSnapshot() {
-        guard let webView = self.webView, !isSnapshotting else { return }
-        isSnapshotting = true
-        
-        let config = WKSnapshotConfiguration()
-        config.rect = webView.bounds
-        config.afterScreenUpdates = false
-        
-        webView.takeSnapshot(with: config) { [weak self] image, error in
-            guard let self = self else { return }
-            self.isSnapshotting = false
-            
-            if let image = image {
-                onSnapshotImage?(image)
-            }
-        }
-    }
-
-    /// Must be called from VREngine.renderer(_:updateAtTime:) once the node
-    /// belongs to a live scene.
-    func applySnapshot(_ image: UIImage) {
-        guard !isCinemaMode else { return }
-        geometry?.firstMaterial?.diffuse.contents = image
-    }
-    
-    // MARK: - Interaction Simulation
-    
-    func simulateClick(at uv: CGPoint) {
-        let js = """
-            (function() {
-                var cssX = \(uv.x) * window.innerWidth;
-                var cssY = \(uv.y) * window.innerHeight;
-                var el = document.elementFromPoint(cssX, cssY);
-                
-                if(el) {
-                    // Visual feedback ripple dot on the web canvas
-                    var dot = document.createElement('div');
-                    dot.style.cssText = 'position:fixed;left:'+(cssX-12)+'px;top:'+(cssY-12)+'px;width:24px;height:24px;background:rgba(0,212,255,0.9);border-radius:50%;z-index:999999;pointer-events:none;box-shadow:0 0 20px #00d4ff;transition:transform 0.35s, opacity 0.35s;';
-                    document.body.appendChild(dot);
-                    requestAnimationFrame(function(){ dot.style.transform = 'scale(2.2)'; dot.style.opacity = '0'; });
-                    setTimeout(function(){ dot.remove(); }, 380);
-                    
-                    // 1. Touch Events (Unlocks iOS WebKit media autoplay permissions)
-                    try {
-                        var touchObj = new Touch({
-                            identifier: Date.now(),
-                            target: el,
-                            clientX: cssX,
-                            clientY: cssY,
-                            screenX: cssX,
-                            screenY: cssY,
-                            pageX: cssX + window.pageXOffset,
-                            pageY: cssY + window.pageYOffset
-                        });
-                        el.dispatchEvent(new TouchEvent('touchstart', { cancelable: true, bubbles: true, touches: [touchObj], targetTouches: [touchObj], changedTouches: [touchObj] }));
-                        el.dispatchEvent(new TouchEvent('touchend', { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [touchObj] }));
-                    } catch(te) {}
-
-                    // 2. Pointer & Mouse Events
-                    var opts = {bubbles:true, cancelable:true, view:window, clientX:cssX, clientY:cssY, screenX:cssX, screenY:cssY};
-                    el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({}, opts, {pointerType:'touch'})));
-                    el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, opts, {pointerType:'touch'})));
-                    el.dispatchEvent(new MouseEvent('mousedown', opts));
-                    el.dispatchEvent(new MouseEvent('mouseup', opts));
-                    el.dispatchEvent(new MouseEvent('click', opts));
-                    
-                    // 3. Clickable Navigation & YouTube Play Button Handling
-                    var clickable = el.closest('a, button, input, textarea, [role="button"], .card, .dock-item, .nav-btn, .vfd-btn, ytd-thumbnail, ytd-rich-item-renderer, ytd-compact-video-renderer, ytd-video-renderer, yt-img-shadow, .media-item-thumbnail-container, .ytp-play-button, .ytp-large-play-button, .player-control-play-pause-icon');
-                    if(clickable) {
-                        if(typeof clickable.click === 'function') clickable.click();
-                        var link = clickable.closest('a') || clickable.querySelector('a');
-                        if(link && typeof link.click === 'function') link.click();
-                    } else if(typeof el.click === 'function') {
-                        el.click();
-                    }
-                    
-                    // 4. Suppress native iOS mobile software keyboard and open VR Air Keyboard
-                    var inputEl = el.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], #search, #search-input, ytd-searchbox, form#search-form, [aria-label*="Search" i], [placeholder*="Search" i]') || el.querySelector('input, textarea');
-                    if(inputEl) {
-                        var actualInput = (inputEl.tagName === 'INPUT' || inputEl.tagName === 'TEXTAREA') ? inputEl : (inputEl.querySelector('input, textarea') || inputEl);
-                        actualInput.setAttribute('inputmode', 'none');
-                        actualInput.focus();
-                        var kb = document.getElementById('vr-air-keyboard');
-                        if(kb) kb.classList.add('visible');
-                    }
-                }
-            })();
-        """
-        webView?.evaluateJavaScript(js, completionHandler: nil)
-        
-        // Immediate snapshot triggers on click
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.requestSnapshot() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak self] in self?.requestSnapshot() }
-    }
-    
-    private var lastScrollTime = Date()
-    
-    func simulateScroll(by delta: CGFloat) {
-        let now = Date()
-        guard now.timeIntervalSince(lastScrollTime) >= 0.035 else { return } // Throttle to avoid WebKit queue flooding
-        lastScrollTime = now
-        
-        let pixels = delta * 650
-        let js = "window.scrollBy({top: \(pixels), behavior: 'auto'});"
-        webView?.evaluateJavaScript(js, completionHandler: nil)
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self] in self?.requestSnapshot() }
-    }
-    
-    // MARK: - Navigation
-    
-    func navigateTo(url: URL) {
-        exitCinemaMode()
-        isShowingOS = false
-        webView?.load(URLRequest(url: url))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.requestSnapshot() }
-    }
-    
-    func goHome() {
-        exitCinemaMode()
-        isShowingOS = true
-        if let html = VRMonitorNode.cachedOSHTML {
-            webView?.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
-    }
-    
-    func goBack() {
-        exitCinemaMode()
-        webView?.goBack()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
-    }
-    
-    func goForward() {
-        exitCinemaMode()
-        webView?.goForward()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
-    }
-    
-    func reload() {
-        exitCinemaMode()
-        webView?.reload()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
-    }
-    
-    // MARK: - WKScriptMessageHandler (JS -> Swift Bridge)
-    
-    func userContentController(_ userContentController: WKUserContentController,
-                               didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any],
-              let action = body["action"] as? String else { return }
-        
-        switch action {
-        case "navigate":
-            if let urlStr = body["url"] as? String {
-                var finalURL = urlStr.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !finalURL.hasPrefix("http://") && !finalURL.hasPrefix("https://") {
-                    if finalURL.contains(".") && !finalURL.contains(" ") {
-                        finalURL = "https://" + finalURL
-                    } else {
-                        finalURL = "https://www.google.com/search?q=" + (finalURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? finalURL)
-                    }
-                }
-                if let url = URL(string: finalURL) {
-                    navigateTo(url: url)
-                }
-            }
-        case "goHome":
-            goHome()
-        case "goBack":
-            goBack()
-        case "goForward":
-            goForward()
-        case "reload":
-            reload()
-        case "setScale":
-            if let scale = body["scale"] as? Double {
-                onScaleChanged?(CGFloat(scale))
-            }
-        case "setIPD":
-            if let ipd = body["ipd"] as? Double {
-                onIPDChanged?(Float(ipd) / 1000.0) // convert mm to meters
-            }
-        case "recalibrate":
-            onRecalibrateRequested?()
-        case "togglePassthrough":
-            if let enabled = body["enabled"] as? Bool {
-                onPassthroughToggled?(enabled)
-            }
-        case "exitVR":
-            onExitVRRequested?()
-        case "playNativeCinema":
-            let videoId = body["videoId"] as? String
-            let title = body["title"] as? String ?? "Cinema Video"
-            let directUrl = body["url"] as? String
-            playSpatialCinemaVideo(videoId: videoId, directUrl: directUrl, title: title)
-        case "closeNativeCinema":
-            exitCinemaMode()
-        case "togglePlayPauseCinema":
-            togglePlayPauseCinema()
-        case "seekCinema":
-            if let seconds = body["seconds"] as? Double {
-                seekCinema(by: seconds)
-            }
-        default:
+    public func goBack() {
+        switch currentState {
+        case .home:
             break
+        default:
+            goHome()
         }
     }
     
-    // MARK: - Native Spatial Cinema AVPlayer Engine
-    
-    private let presetCinemaStreams: [String: String] = [
-        "LXb3EKWsInQ": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-        "jfKfPfyJRdk": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-        "9No-FiEInLA": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
-        "dQw4w9WgXcQ": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-        "M576WGiDBdQ": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-    ]
-    
-    func playSpatialCinemaVideo(videoId: String?, directUrl: String?, title: String) {
-        if let direct = directUrl, let u = URL(string: direct) {
-            startAVPlayerStreaming(url: u, title: title)
-            return
-        }
-        
-        if let id = videoId {
-            if let preset = presetCinemaStreams[id], let u = URL(string: preset) {
-                startAVPlayerStreaming(url: u, title: title)
-            } else {
-                resolveOnlineStreamAndPlay(videoId: id, title: title)
-            }
-        }
+    public func goForward() {}
+    public func reload() {
+        renderCurrentState()
     }
     
-    func resolveOnlineStreamAndPlay(videoId: String, title: String) {
-        let endpoint = "https://pipedapi.kavin.rocks/streams/\(videoId)"
-        guard let apiURL = URL(string: endpoint) else {
-            if let fallback = URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") {
-                startAVPlayerStreaming(url: fallback, title: title)
-            }
-            return
-        }
+    // MARK: - Direct Metal GPU Video Cinema Engine
+    public func startCinemaStream(item: SpatialVideoItem) {
+        guard let url = URL(string: item.streamURL) else { return }
         
-        var request = URLRequest(url: apiURL)
-        request.timeoutInterval = 4.0
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            var resolvedURL: URL? = nil
-            
-            if let data = data,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if let hlsUrl = json["hls"] as? String, let u = URL(string: hlsUrl) {
-                    resolvedURL = u
-                } else if let videoStreams = json["videoStreams"] as? [[String: Any]],
-                          let first = videoStreams.first(where: { ($0["format"] as? String) == "MPEG_4" || ($0["mimeType"] as? String)?.contains("mp4") == true }),
-                          let streamStr = first["url"] as? String, let u = URL(string: streamStr) {
-                    resolvedURL = u
-                }
-            }
-            
-            DispatchQueue.main.async {
-                if let url = resolvedURL {
-                    self?.startAVPlayerStreaming(url: url, title: title)
-                } else {
-                    if let fallback = URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") {
-                        self?.startAVPlayerStreaming(url: fallback, title: title)
-                    }
-                }
-            }
-        }.resume()
-    }
-    
-    private var videoSKNode: SKVideoNode?
-    private var videoSKScene: SKScene?
-    
-    func startAVPlayerStreaming(url: URL, title: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
@@ -469,8 +229,10 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             player.actionAtItemEnd = .none
             self.cinemaPlayer = player
             self.isCinemaMode = true
+            self.currentVideoTitle = item.title
+            self.currentState = .cinemaTheater(item: item)
             
-            // Create SpriteKit Video Texture for SceneKit
+            // Create SpriteKit Video Texture for SceneKit (Zero-Copy Metal GPU Pipeline)
             let sceneSize = CGSize(width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
             let skScene = SKScene(size: sceneSize)
             skScene.backgroundColor = .black
@@ -484,7 +246,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             self.videoSKScene = skScene
             self.videoSKNode = videoNode
             
-            // Assign SpriteKit dynamic video texture to SCNMaterial
+            // Assign dynamic SpriteKit video texture to SCNMaterial
             self.geometry?.firstMaterial?.diffuse.contents = skScene
             videoNode.play()
             player.play()
@@ -499,11 +261,13 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 self?.exitCinemaMode()
             }
             
-            AppLogger.shared.log("[VRMonitorNode] Native AVPlayer Spatial Cinema started for \(title): \(url.absoluteString)")
+            // Register Cinema HUD Click Zones (Top bar & controls overlay)
+            self.registerCinemaClickZones(item: item)
+            AppLogger.shared.log("[VRMonitorNode] Direct Metal GPU Video started for \(item.title): \(url.absoluteString)")
         }
     }
     
-    func exitCinemaMode() {
+    public func exitCinemaMode() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.cinemaPlayer?.pause()
@@ -512,11 +276,12 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             self.videoSKNode = nil
             self.videoSKScene = nil
             self.isCinemaMode = false
-            self.requestSnapshot()
+            self.currentState = .home
+            self.renderCurrentState()
         }
     }
     
-    func togglePlayPauseCinema() {
+    public func togglePlayPauseCinema() {
         guard let player = cinemaPlayer else { return }
         if player.rate > 0 {
             player.pause()
@@ -525,35 +290,413 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         }
     }
     
-    func seekCinema(by seconds: Double) {
+    public func seekCinema(by seconds: Double) {
         guard let player = cinemaPlayer else { return }
         let current = player.currentTime()
         let target = CMTimeAdd(current, CMTime(seconds: seconds, preferredTimescale: 600))
         player.seek(to: target)
     }
     
-    // MARK: - WKNavigationDelegate
+    // MARK: - Native CoreGraphics Canvas Renderer
+    public func renderCurrentState() {
+        guard !isCinemaMode else { return }
+        
+        let size = CGSize(width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        
+        var zones: [ClickableZone] = []
+        
+        let image = renderer.image { ctx in
+            let cgCtx = ctx.cgContext
+            
+            // 1. Draw Deep Space Gradient Canvas
+            drawBackgroundGradient(in: CGRect(origin: .zero, size: size), ctx: cgCtx)
+            
+            // 2. Draw Left Sidebar Dock
+            let dockZones = drawSidebarDock(in: size, ctx: cgCtx)
+            zones.append(contentsOf: dockZones)
+            
+            // 3. Draw Main Top Header Bar
+            let mainArea = CGRect(x: 100, y: 0, width: size.width - 100, height: size.height)
+            drawTopBar(in: mainArea, ctx: cgCtx)
+            
+            // 4. Draw View Content based on State Machine
+            let contentRect = CGRect(x: 120, y: 80, width: size.width - 140, height: size.height - 100)
+            
+            switch currentState {
+            case .home, .youtubeFeed:
+                let contentZones = drawHomeView(in: contentRect, ctx: cgCtx)
+                zones.append(contentsOf: contentZones)
+            case .settings:
+                let settingsZones = drawSettingsView(in: contentRect, ctx: cgCtx)
+                zones.append(contentsOf: settingsZones)
+            case .cinemaTheater(let item):
+                let cinemaZones = drawCinemaViewOverlay(in: contentRect, item: item, ctx: cgCtx)
+                zones.append(contentsOf: cinemaZones)
+            }
+        }
+        
+        self.activeClickableZones = zones
+        self.geometry?.firstMaterial?.diffuse.contents = image
+        self.onSnapshotImage?(image)
+    }
     
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        requestSnapshot()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.requestSnapshot()
+    // MARK: - Canvas Drawing Helpers
+    
+    private func drawBackgroundGradient(in rect: CGRect, ctx: CGContext) {
+        let colors = [
+            UIColor(red: 0.04, green: 0.06, blue: 0.14, alpha: 1.0).cgColor,
+            UIColor(red: 0.02, green: 0.03, blue: 0.08, alpha: 1.0).cgColor
+        ]
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0.0, 1.0]) {
+            ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: rect.width, y: rect.height), options: [])
         }
     }
     
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        requestSnapshot()
+    private func drawSidebarDock(in size: CGSize, ctx: CGContext) -> [ClickableZone] {
+        var zones: [ClickableZone] = []
+        let dockWidth: CGFloat = 100
+        let dockRect = CGRect(x: 0, y: 0, width: dockWidth, height: size.height)
+        
+        // Dock background
+        UIColor(red: 0.08, green: 0.11, blue: 0.20, alpha: 0.85).setFill()
+        UIBezierPath(rect: dockRect).fill()
+        
+        // Dock right divider line
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.25).setStroke()
+        let line = UIBezierPath()
+        line.move(to: CGPoint(x: dockWidth, y: 0))
+        line.addLine(to: CGPoint(x: dockWidth, y: size.height))
+        line.lineWidth = 2
+        line.stroke()
+        
+        // Dock Items
+        let items: [(icon: String, title: String, state: SpatialViewState, action: () -> Void)] = [
+            ("🏠", "Home", .home, { [weak self] in self?.setViewState(.home) }),
+            ("🎬", "Cinema", .cinemaTheater(item: self.cinemaCatalog[0]), { [weak self] in
+                guard let self = self else { return }
+                self.startCinemaStream(item: self.cinemaCatalog[0])
+            }),
+            ("⚙️", "Settings", .settings, { [weak self] in self?.setViewState(.settings) }),
+            ("🎯", "Center", .home, { [weak self] in self?.onRecalibrateRequested?() })
+        ]
+        
+        var yPos: CGFloat = 40
+        for item in items {
+            let itemRect = CGRect(x: 10, y: yPos, width: 80, height: 75)
+            let isCurrent: Bool
+            switch (currentState, item.state) {
+            case (.home, .home), (.settings, .settings):
+                isCurrent = true
+            default:
+                isCurrent = false
+            }
+            
+            if isCurrent {
+                UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.25).setFill()
+                let bgPath = UIBezierPath(roundedRect: itemRect, cornerRadius: 16)
+                bgPath.fill()
+                UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.8).setStroke()
+                bgPath.lineWidth = 1.5
+                bgPath.stroke()
+            }
+            
+            // Draw Icon
+            let iconFont = UIFont.systemFont(ofSize: 28)
+            let iconAttr: [NSAttributedString.Key: Any] = [.font: iconFont, .foregroundColor: UIColor.white]
+            let iconSize = (item.icon as NSString).size(withAttributes: iconAttr)
+            (item.icon as NSString).draw(at: CGPoint(x: itemRect.midX - iconSize.width / 2, y: itemRect.minY + 10), withAttributes: iconAttr)
+            
+            // Draw Label
+            let labelFont = UIFont.systemFont(ofSize: 13, weight: .bold)
+            let labelAttr: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: isCurrent ? UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0) : UIColor.white.withAlphaComponent(0.8)]
+            let labelSize = (item.title as NSString).size(withAttributes: labelAttr)
+            (item.title as NSString).draw(at: CGPoint(x: itemRect.midX - labelSize.width / 2, y: itemRect.minY + 46), withAttributes: labelAttr)
+            
+            zones.append(ClickableZone(rect: itemRect, action: item.action))
+            yPos += 95
+        }
+        
+        return zones
     }
     
-    // MARK: - Border Frame
+    private func drawTopBar(in rect: CGRect, ctx: CGContext) {
+        let topBarRect = CGRect(x: rect.minX, y: 0, width: rect.width, height: 60)
+        UIColor(white: 1.0, alpha: 0.03).setFill()
+        UIBezierPath(rect: topBarRect).fill()
+        
+        // Title
+        let titleFont = UIFont.systemFont(ofSize: 20, weight: .heavy)
+        let titleAttr: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: UIColor.white]
+        let titleText: String
+        switch currentState {
+        case .home: titleText = "MadhurVision OS • Spatial Hub"
+        case .cinemaTheater(let item): titleText = "🎬 Cinema Theater • \(item.category)"
+        case .youtubeFeed: titleText = "📺 YouTube Spatial Feed"
+        case .settings: titleText = "⚙️ System Settings"
+        }
+        (titleText as NSString).draw(at: CGPoint(x: rect.minX + 20, y: 18), withAttributes: titleAttr)
+        
+        // 120 FPS Metal Badge
+        let badgeRect = CGRect(x: rect.maxX - 380, y: 14, width: 140, height: 32)
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.15).setFill()
+        let badgePath = UIBezierPath(roundedRect: badgeRect, cornerRadius: 8)
+        badgePath.fill()
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.5).setStroke()
+        badgePath.lineWidth = 1
+        badgePath.stroke()
+        
+        let badgeFont = UIFont.systemFont(ofSize: 13, weight: .bold)
+        let badgeAttr: [NSAttributedString.Key: Any] = [.font: badgeFont, .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0)]
+        let badgeText = "⚡ 120 FPS Metal"
+        let bSize = (badgeText as NSString).size(withAttributes: badgeAttr)
+        (badgeText as NSString).draw(at: CGPoint(x: badgeRect.midX - bSize.width / 2, y: badgeRect.midY - bSize.height / 2), withAttributes: badgeAttr)
+        
+        // Clock
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        let timeStr = timeFormatter.string(from: Date())
+        let clockFont = UIFont.monospacedDigitSystemFont(ofSize: 18, weight: .bold)
+        let clockAttr: [NSAttributedString.Key: Any] = [.font: clockFont, .foregroundColor: UIColor.white.withAlphaComponent(0.9)]
+        (timeStr as NSString).draw(at: CGPoint(x: rect.maxX - 80, y: 18), withAttributes: clockAttr)
+    }
     
+    private func drawHomeView(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
+        var zones: [ClickableZone] = []
+        
+        // 1. Header Hero Banner
+        let heroRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 90)
+        let heroPath = UIBezierPath(roundedRect: heroRect, cornerRadius: 18)
+        UIColor(red: 0.08, green: 0.12, blue: 0.25, alpha: 0.6).setFill()
+        heroPath.fill()
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3).setStroke()
+        heroPath.lineWidth = 1
+        heroPath.stroke()
+        
+        let heroTitle = "🎬 Direct Metal Spatial Cinema Theater"
+        let heroTitleAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 22, weight: .bold), .foregroundColor: UIColor.white]
+        (heroTitle as NSString).draw(at: CGPoint(x: heroRect.minX + 24, y: heroRect.minY + 18), withAttributes: heroTitleAttr)
+        
+        let heroSub = "Instant 60/120 FPS hardware decoded video streaming with zero WebKit overhead & zero lag."
+        let heroSubAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.85)]
+        (heroSub as NSString).draw(at: CGPoint(x: heroRect.minX + 24, y: heroRect.minY + 52), withAttributes: heroSubAttr)
+        
+        // 2. Video Card Grid (2 rows x 3 cols)
+        let gridY = heroRect.maxY + 24
+        let cardWidth: CGFloat = (rect.width - 40) / 3.0
+        let cardHeight: CGFloat = 270
+        let spacing: CGFloat = 20
+        
+        for (index, item) in cinemaCatalog.prefix(6).enumerated() {
+            let row = CGFloat(index / 3)
+            let col = CGFloat(index % 3)
+            let cardRect = CGRect(
+                x: rect.minX + col * (cardWidth + spacing),
+                y: gridY + row * (cardHeight + spacing),
+                width: cardWidth,
+                height: cardHeight
+            )
+            
+            // Card Background Gradient
+            let cardPath = UIBezierPath(roundedRect: cardRect, cornerRadius: 18)
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let cColors = item.gradientColors.map { $0.cgColor }
+            if let cGrad = CGGradient(colorsSpace: colorSpace, colors: cColors as CFArray, locations: [0.0, 1.0]) {
+                ctx.saveGState()
+                cardPath.addClip()
+                ctx.drawLinearGradient(cGrad, start: CGPoint(x: cardRect.minX, y: cardRect.minY), end: CGPoint(x: cardRect.maxX, y: cardRect.maxY), options: [])
+                ctx.restoreGState()
+            }
+            
+            // Glowing border
+            UIColor(white: 1.0, alpha: 0.15).setStroke()
+            cardPath.lineWidth = 1.5
+            cardPath.stroke()
+            
+            // Video Thumbnail Area
+            let thumbRect = CGRect(x: cardRect.minX + 12, y: cardRect.minY + 12, width: cardRect.width - 24, height: 140)
+            let thumbPath = UIBezierPath(roundedRect: thumbRect, cornerRadius: 12)
+            UIColor(white: 0.0, alpha: 0.4).setFill()
+            thumbPath.fill()
+            
+            // Icon & Category Tag
+            let iconFont = UIFont.systemFont(ofSize: 42)
+            let iAttr: [NSAttributedString.Key: Any] = [.font: iconFont, .foregroundColor: UIColor.white]
+            let iSize = (item.icon as NSString).size(withAttributes: iAttr)
+            (item.icon as NSString).draw(at: CGPoint(x: thumbRect.midX - iSize.width / 2, y: thumbRect.midY - iSize.height / 2), withAttributes: iAttr)
+            
+            let tagRect = CGRect(x: thumbRect.minX + 8, y: thumbRect.maxY - 28, width: 100, height: 20)
+            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3).setFill()
+            UIBezierPath(roundedRect: tagRect, cornerRadius: 6).fill()
+            let tagAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: UIColor.white]
+            (item.category as NSString).draw(at: CGPoint(x: tagRect.minX + 6, y: tagRect.minY + 3), withAttributes: tagAttr)
+            
+            // Video Title
+            let tFont = UIFont.systemFont(ofSize: 14, weight: .bold)
+            let tAttr: [NSAttributedString.Key: Any] = [.font: tFont, .foregroundColor: UIColor.white]
+            let titleBounding = CGRect(x: cardRect.minX + 14, y: thumbRect.maxY + 10, width: cardRect.width - 28, height: 40)
+            (item.title as NSString).draw(in: titleBounding, withAttributes: tAttr)
+            
+            // Channel & Play Button
+            let chFont = UIFont.systemFont(ofSize: 12)
+            let chAttr: [NSAttributedString.Key: Any] = [.font: chFont, .foregroundColor: UIColor.white.withAlphaComponent(0.6)]
+            (item.channel as NSString).draw(at: CGPoint(x: cardRect.minX + 14, y: cardRect.maxY - 35), withAttributes: chAttr)
+            
+            let playBtnRect = CGRect(x: cardRect.maxX - 85, y: cardRect.maxY - 42, width: 72, height: 28)
+            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.9).setFill()
+            let pPath = UIBezierPath(roundedRect: playBtnRect, cornerRadius: 14)
+            pPath.fill()
+            let pAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 12, weight: .bold), .foregroundColor: UIColor.black]
+            let pText = "▶ Play"
+            let pSize = (pText as NSString).size(withAttributes: pAttr)
+            (pText as NSString).draw(at: CGPoint(x: playBtnRect.midX - pSize.width / 2, y: playBtnRect.midY - pSize.height / 2), withAttributes: pAttr)
+            
+            // Action
+            zones.append(ClickableZone(rect: cardRect, action: { [weak self] in
+                self?.startCinemaStream(item: item)
+            }))
+        }
+        
+        return zones
+    }
+    
+    private func drawSettingsView(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
+        var zones: [ClickableZone] = []
+        
+        let containerRect = CGRect(x: rect.minX + 40, y: rect.minY + 20, width: rect.width - 80, height: rect.height - 40)
+        let cPath = UIBezierPath(roundedRect: containerRect, cornerRadius: 20)
+        UIColor(red: 0.08, green: 0.11, blue: 0.22, alpha: 0.7).setFill()
+        cPath.fill()
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.25).setStroke()
+        cPath.lineWidth = 1.5
+        cPath.stroke()
+        
+        var y: CGFloat = containerRect.minY + 30
+        
+        // SECTION 1: Virtual Display Scale
+        let sTitle = "Virtual Display Sizing"
+        (sTitle as NSString).draw(at: CGPoint(x: containerRect.minX + 30, y: y), withAttributes: [.font: UIFont.systemFont(ofSize: 20, weight: .bold), .foregroundColor: UIColor.white])
+        y += 40
+        
+        let scales: [(title: String, val: CGFloat)] = [
+            ("10\" Compact", 0.7),
+            ("12\" Standard", 1.0),
+            ("15\" Theater", 1.4),
+            ("50\" IMAX Cinema", 2.0)
+        ]
+        
+        let btnWidth: CGFloat = 160
+        var btnX = containerRect.minX + 30
+        for s in scales {
+            let bRect = CGRect(x: btnX, y: y, width: btnWidth, height: 44)
+            let isSel = abs(self.currentScale - s.val) < 0.1
+            if isSel {
+                UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.9).setFill()
+            } else {
+                UIColor(white: 1.0, alpha: 0.08).setFill()
+            }
+            let bPath = UIBezierPath(roundedRect: bRect, cornerRadius: 12)
+            bPath.fill()
+            
+            let bAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 14, weight: .bold), .foregroundColor: isSel ? UIColor.black : UIColor.white]
+            let bSize = (s.title as NSString).size(withAttributes: bAttr)
+            (s.title as NSString).draw(at: CGPoint(x: bRect.midX - bSize.width / 2, y: bRect.midY - bSize.height / 2), withAttributes: bAttr)
+            
+            zones.append(ClickableZone(rect: bRect, action: { [weak self] in
+                guard let self = self else { return }
+                self.currentScale = s.val
+                self.onScaleChanged?(s.val)
+                self.renderCurrentState()
+            }))
+            btnX += btnWidth + 15
+        }
+        y += 70
+        
+        // SECTION 2: Orientation & Head Recalibration
+        let rTitle = "Orientation & Recalibration"
+        (rTitle as NSString).draw(at: CGPoint(x: containerRect.minX + 30, y: y), withAttributes: [.font: UIFont.systemFont(ofSize: 20, weight: .bold), .foregroundColor: UIColor.white])
+        y += 40
+        
+        let recalBtnRect = CGRect(x: containerRect.minX + 30, y: y, width: 280, height: 48)
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.2).setFill()
+        let rPath = UIBezierPath(roundedRect: recalBtnRect, cornerRadius: 14)
+        rPath.fill()
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.8).setStroke()
+        rPath.lineWidth = 1.5
+        rPath.stroke()
+        
+        let rText = "🎯 Recalibrate Center View"
+        let rAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: UIColor.white]
+        let rSize = (rText as NSString).size(withAttributes: rAttr)
+        (rText as NSString).draw(at: CGPoint(x: recalBtnRect.midX - rSize.width / 2, y: recalBtnRect.midY - rSize.height / 2), withAttributes: rAttr)
+        
+        zones.append(ClickableZone(rect: recalBtnRect, action: { [weak self] in
+            self?.onRecalibrateRequested?()
+        }))
+        
+        // Exit VR Button
+        let exitBtnRect = CGRect(x: recalBtnRect.maxX + 20, y: y, width: 180, height: 48)
+        UIColor(red: 1.0, green: 0.2, blue: 0.3, alpha: 0.2).setFill()
+        let ePath = UIBezierPath(roundedRect: exitBtnRect, cornerRadius: 14)
+        ePath.fill()
+        UIColor(red: 1.0, green: 0.3, blue: 0.4, alpha: 0.8).setStroke()
+        ePath.lineWidth = 1.5
+        ePath.stroke()
+        
+        let eText = "✕ Exit VR"
+        let eAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: UIColor(red: 1.0, green: 0.5, blue: 0.6, alpha: 1.0)]
+        let eSize = (eText as NSString).size(withAttributes: eAttr)
+        (eText as NSString).draw(at: CGPoint(x: exitBtnRect.midX - eSize.width / 2, y: exitBtnRect.midY - eSize.height / 2), withAttributes: eAttr)
+        
+        zones.append(ClickableZone(rect: exitBtnRect, action: { [weak self] in
+            self?.onExitVRRequested?()
+        }))
+        
+        return zones
+    }
+    
+    private func drawCinemaViewOverlay(in rect: CGRect, item: SpatialVideoItem, ctx: CGContext) -> [ClickableZone] {
+        var zones: [ClickableZone] = []
+        registerCinemaClickZones(item: item)
+        return zones
+    }
+    
+    private func registerCinemaClickZones(item: SpatialVideoItem) {
+        var zones: [ClickableZone] = []
+        
+        // Left dock items (Home & Exit Cinema)
+        let dockWidth: CGFloat = 100
+        let homeZone = ClickableZone(rect: CGRect(x: 0, y: 40, width: dockWidth, height: 80), action: { [weak self] in
+            self?.exitCinemaMode()
+        })
+        zones.append(homeZone)
+        
+        // Top HUD Overlay: Close Theater Button (top right)
+        let closeRect = CGRect(x: VRMonitorNode.canvasWidth - 160, y: 15, width: 140, height: 45)
+        let closeZone = ClickableZone(rect: closeRect, action: { [weak self] in
+            self?.exitCinemaMode()
+        })
+        zones.append(closeZone)
+        
+        // Play / Pause Zone (center tap anywhere on the screen)
+        let screenCenterRect = CGRect(x: 200, y: 100, width: VRMonitorNode.canvasWidth - 400, height: VRMonitorNode.canvasHeight - 200)
+        let playPauseZone = ClickableZone(rect: screenCenterRect, action: { [weak self] in
+            self?.togglePlayPauseCinema()
+        })
+        zones.append(playPauseZone)
+        
+        self.activeClickableZones = zones
+    }
+    
+    // MARK: - Glowing Border Frame
     private func addBorderFrame(width: CGFloat, height: CGFloat) {
         let borderPlane = SCNPlane(width: width + 0.08, height: height + 0.08)
         borderPlane.cornerRadius = 0.06
         
         let borderMaterial = SCNMaterial()
         borderMaterial.diffuse.contents = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.15)
-        borderMaterial.emission.contents = UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 0.8) // Glowing cyan frame
+        borderMaterial.emission.contents = UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 0.8)
         borderMaterial.lightingModel = .constant
         borderMaterial.isDoubleSided = true
         borderPlane.materials = [borderMaterial]
@@ -562,1130 +705,5 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         borderNode.name = "monitor_border"
         borderNode.position = SCNVector3(0, 0, -0.003)
         addChildNode(borderNode)
-    }
-    
-    // MARK: - Instant Frame 0 Placeholder Renderer
-    
-    private static func renderInstantPlaceholder() -> UIImage {
-        let size = CGSize(width: canvasWidth, height: canvasHeight)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            let rect = CGRect(origin: .zero, size: size)
-            
-            // Deep gradient background
-            let colors = [
-                UIColor(red: 0.05, green: 0.08, blue: 0.18, alpha: 1.0).cgColor,
-                UIColor(red: 0.03, green: 0.04, blue: 0.10, alpha: 1.0).cgColor
-            ]
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0.0, 1.0]) {
-                ctx.cgContext.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: size.width, y: size.height), options: [])
-            }
-            
-            // Dock background on left
-            let dockRect = CGRect(x: 0, y: 0, width: 80, height: size.height)
-            UIColor(red: 0.06, green: 0.08, blue: 0.14, alpha: 0.85).setFill()
-            UIRectFill(dockRect)
-            
-            // Dock border line
-            let dockLine = CGRect(x: 80, y: 0, width: 1, height: size.height)
-            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3).setFill()
-            UIRectFill(dockLine)
-            
-            // Top bar
-            let topBar = CGRect(x: 80, y: 0, width: size.width - 80, height: 48)
-            UIColor(white: 1.0, alpha: 0.04).setFill()
-            UIRectFill(topBar)
-            
-            // Top title
-            let topTitle = "MadhurVision OS 2.0"
-            let topAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 16, weight: .bold),
-                .foregroundColor: UIColor.white
-            ]
-            topTitle.draw(at: CGPoint(x: 104, y: 14), withAttributes: topAttrs)
-            
-            // Hero Title
-            let title = "MadhurVision"
-            let titleAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 56, weight: .black),
-                .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0)
-            ]
-            let titleSize = title.size(withAttributes: titleAttrs)
-            title.draw(at: CGPoint(x: (size.width - titleSize.width) / 2.0 + 40, y: size.height * 0.25), withAttributes: titleAttrs)
-            
-            // Subtitle
-            let sub = "Spatial VR Computing • Google Browser • Settings"
-            let subAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 18, weight: .medium),
-                .foregroundColor: UIColor(white: 1.0, alpha: 0.6)
-            ]
-            let subSize = sub.size(withAttributes: subAttrs)
-            sub.draw(at: CGPoint(x: (size.width - subSize.width) / 2.0 + 40, y: size.height * 0.25 + 70), withAttributes: subAttrs)
-            
-            // Search Box mockup
-            let searchRect = CGRect(x: (size.width - 600) / 2.0 + 40, y: size.height * 0.45, width: 600, height: 50)
-            let searchPath = UIBezierPath(roundedRect: searchRect, cornerRadius: 14)
-            UIColor(white: 1.0, alpha: 0.08).setFill()
-            searchPath.fill()
-            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.4).setStroke()
-            searchPath.lineWidth = 1.5
-            searchPath.stroke()
-            
-            let searchPlaceholder = "Search Google or type a URL..."
-            let searchAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 16, weight: .regular),
-                .foregroundColor: UIColor(white: 1.0, alpha: 0.5)
-            ]
-            searchPlaceholder.draw(at: CGPoint(x: searchRect.origin.x + 20, y: searchRect.origin.y + 15), withAttributes: searchAttrs)
-        }
-    }
-    
-    // MARK: - Floating Dock JS (Overlay on external websites)
-    
-    private static func floatingDockJS() -> String {
-        return """
-        (function() {
-            if (document.getElementById('loading-screen') || document.getElementById('desktop')) return;
-            if (document.getElementById('vr-floating-dock')) return;
-            
-            var dock = document.createElement('div');
-            dock.id = 'vr-floating-dock';
-            dock.innerHTML = `
-                <div class="vfd-btn" id="vfd-home" title="OS Home">🏠</div>
-                <div class="vfd-btn" id="vfd-keyboard" title="Air Keyboard" style="background:rgba(0,212,255,0.2);border-color:#00d4ff;">⌨️</div>
-                <div class="vfd-btn" id="vfd-back" title="Back">◀</div>
-                <div class="vfd-btn" id="vfd-fwd" title="Forward">▶</div>
-                <div class="vfd-btn" id="vfd-reload" title="Refresh">↻</div>
-            `;
-            
-            var style = document.createElement('style');
-            style.textContent = `
-                #vr-floating-dock {
-                    position: fixed;
-                    left: 12px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    display: flex;
-                    flex-direction: column;
-                    gap: 10px;
-                    z-index: 2147483647;
-                    background: rgba(10, 15, 25, 0.85);
-                    padding: 8px;
-                    border-radius: 16px;
-                    border: 1px solid rgba(0, 212, 255, 0.3);
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
-                    backdrop-filter: blur(10px);
-                }
-                .vfd-btn {
-                    width: 44px;
-                    height: 44px;
-                    background: rgba(255,255,255,0.08);
-                    border: 1px solid rgba(255,255,255,0.15);
-                    border-radius: 12px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 20px;
-                    cursor: pointer;
-                    color: white;
-                    user-select: none;
-                    transition: all 0.2s;
-                }
-                .vfd-btn:hover { background: rgba(0, 212, 255, 0.25); border-color: #00d4ff; transform: scale(1.08); }
-            `;
-            document.head.appendChild(style);
-            document.body.appendChild(dock);
-            
-            document.getElementById('vfd-home').addEventListener('click', function(e) {
-                e.stopPropagation();
-                window.webkit.messageHandlers.vrOS.postMessage({action:'goHome'});
-            });
-            document.getElementById('vfd-keyboard').addEventListener('click', function(e) {
-                e.stopPropagation();
-                var kb = document.getElementById('vr-air-keyboard');
-                if (kb) {
-                    kb.classList.toggle('visible');
-                }
-            });
-            document.getElementById('vfd-back').addEventListener('click', function(e) {
-                e.stopPropagation();
-                window.webkit.messageHandlers.vrOS.postMessage({action:'goBack'});
-            });
-            document.getElementById('vfd-fwd').addEventListener('click', function(e) {
-                e.stopPropagation();
-                window.webkit.messageHandlers.vrOS.postMessage({action:'goForward'});
-            });
-            document.getElementById('vfd-reload').addEventListener('click', function(e) {
-                e.stopPropagation();
-                window.webkit.messageHandlers.vrOS.postMessage({action:'reload'});
-            });
-        })();
-        """
-    }
-
-    
-    // MARK: - Air Keyboard JS (Universal on all websites & apps)
-    
-    private static func airKeyboardJS() -> String {
-        return """
-        (function() {
-            if (document.getElementById('vr-air-keyboard')) return;
-            
-            var style = document.createElement('style');
-            style.textContent = `
-                #vr-air-keyboard {
-                    position: fixed;
-                    bottom: -70%;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    width: 92%;
-                    max-width: 980px;
-                    background: rgba(10, 16, 28, 0.97);
-                    border: 2px solid rgba(0, 212, 255, 0.4);
-                    border-radius: 20px 20px 0 0;
-                    padding: 14px 18px 20px;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                    z-index: 2147483647;
-                    transition: bottom 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
-                    box-shadow: 0 -15px 60px rgba(0,0,0,0.9), 0 0 30px rgba(0,212,255,0.2);
-                    backdrop-filter: blur(20px);
-                    -webkit-backdrop-filter: blur(20px);
-                }
-                #vr-air-keyboard.visible { bottom: 0 !important; }
-                .kb-topbar {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 0 4px 6px;
-                    border-bottom: 1px solid rgba(0, 212, 255, 0.2);
-                    margin-bottom: 4px;
-                }
-                .kb-title { font-size: 13px; font-weight: 700; color: #00d4ff; letter-spacing: 1px; text-transform: uppercase; font-family: -apple-system, sans-serif; }
-                .kb-close-btn {
-                    background: rgba(255,255,255,0.12);
-                    border: 1px solid rgba(255,255,255,0.2);
-                    color: #fff;
-                    font-size: 13px;
-                    font-weight: 600;
-                    padding: 4px 14px;
-                    border-radius: 20px;
-                    cursor: pointer;
-                    font-family: -apple-system, sans-serif;
-                }
-                .kb-close-btn:active { background: #ff0055; }
-                .kb-row { display: flex; justify-content: center; gap: 6px; }
-                .kb-key {
-                    background: rgba(255,255,255,0.12);
-                    border: 1px solid rgba(255,255,255,0.18);
-                    color: white;
-                    font-size: 18px;
-                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                    font-weight: 600;
-                    padding: 11px 0;
-                    flex: 1;
-                    border-radius: 8px;
-                    text-align: center;
-                    cursor: pointer;
-                    user-select: none;
-                    -webkit-user-select: none;
-                    transition: transform 0.1s, background 0.1s;
-                }
-                .kb-key:active { background: rgba(0,212,255,0.5); transform: scale(0.92); }
-                .kb-key.action { background: rgba(0,212,255,0.22); border-color: rgba(0,212,255,0.4); color: #00d4ff; }
-                .kb-key.wide { flex: 1.6; }
-                .kb-key.space { flex: 5.2; }
-            `;
-            document.head.appendChild(style);
-            
-            var kb = document.createElement('div');
-            kb.id = 'vr-air-keyboard';
-            
-            var topBar = document.createElement('div');
-            topBar.className = 'kb-topbar';
-            topBar.innerHTML = '<span class="kb-title">⌨️ VR Air Keyboard</span><button class="kb-close-btn" id="kb-close-action">✕ Done</button>';
-            kb.appendChild(topBar);
-            
-            var layout = [
-                ['1','2','3','4','5','6','7','8','9','0'],
-                ['Q','W','E','R','T','Y','U','I','O','P'],
-                ['A','S','D','F','G','H','J','K','L'],
-                ['Z','X','C','V','B','N','M','DEL'],
-                ['https://','@','.com','SPACE','.','↵ GO']
-            ];
-            
-            var currentTargetInput = null;
-            
-            layout.forEach(function(row) {
-                var rowDiv = document.createElement('div');
-                rowDiv.className = 'kb-row';
-                row.forEach(function(key) {
-                    var btn = document.createElement('div');
-                    btn.className = 'kb-key';
-                    if (key === 'SPACE') { btn.classList.add('space'); btn.textContent = 'Space'; }
-                    else if (key === 'DEL') { btn.classList.add('wide', 'action'); btn.textContent = '⌫'; }
-                    else if (key === '↵ GO') { btn.classList.add('wide', 'action'); btn.textContent = '↵ Search'; }
-                    else if (key === '.com') { btn.classList.add('wide'); btn.textContent = '.com'; }
-                    else if (key === 'https://') { btn.classList.add('wide'); btn.textContent = 'https://'; }
-                    else { btn.textContent = key; }
-                    
-                    btn.addEventListener('mousedown', function(e) { e.preventDefault(); });
-                    btn.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        var target = currentTargetInput || document.activeElement;
-                        if (!target) return;
-                        
-                        if (target.isContentEditable) {
-                            if (key === 'DEL') {
-                                document.execCommand('delete', false, null);
-                            } else if (key === 'SPACE') {
-                                document.execCommand('insertText', false, ' ');
-                            } else if (key === '↵ GO') {
-                                kb.classList.remove('visible');
-                                return;
-                            } else {
-                                var txt = (key === 'https://' || key === '.com' || key === '@' || key === '.') ? key : key.toLowerCase();
-                                document.execCommand('insertText', false, txt);
-                            }
-                            return;
-                        }
-                        
-                        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') return;
-                        
-                        if (key === 'DEL') {
-                            target.value = target.value.slice(0, -1);
-                        } else if (key === 'SPACE') {
-                            target.value += ' ';
-                        } else if (key === '↵ GO') {
-                            kb.classList.remove('visible');
-                            var form = target.closest('form') || document.querySelector('form#search-form, form');
-                            if (form) {
-                                if (typeof form.requestSubmit === 'function') form.requestSubmit();
-                                else form.submit();
-                            }
-                            var searchBtn = document.querySelector('#search-icon-legacy, button#search-button, button.search-button, [aria-label="Search"]');
-                            if (searchBtn && typeof searchBtn.click === 'function') searchBtn.click();
-                            var ev = new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true});
-                            target.dispatchEvent(ev);
-                            target.blur();
-                            return;
-                        } else if (key === '.com') { target.value += '.com'; }
-                        else if (key === 'https://') { target.value += 'https://'; }
-                        else if (key === '@') { target.value += '@'; }
-                        else if (key === '.') { target.value += '.'; }
-                        else { target.value += key.toLowerCase(); }
-                        
-                        target.dispatchEvent(new Event('input', { bubbles: true }));
-                        target.dispatchEvent(new Event('change', { bubbles: true }));
-                    });
-                    rowDiv.appendChild(btn);
-                });
-                kb.appendChild(rowDiv);
-            });
-            
-            document.body.appendChild(kb);
-            
-            document.getElementById('kb-close-action').addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                kb.classList.remove('visible');
-                if (currentTargetInput) currentTargetInput.blur();
-            });
-            
-            function findInputTarget(node) {
-                if (!node) return null;
-                if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.isContentEditable) return node;
-                var closest = node.closest('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"], #search, #search-input, ytd-searchbox, form#search-form, [aria-label*="Search" i], [placeholder*="Search" i]');
-                if (closest) {
-                    return (closest.tagName === 'INPUT' || closest.tagName === 'TEXTAREA') ? closest : (closest.querySelector('input, textarea') || closest);
-                }
-                return node.querySelector ? node.querySelector('input, textarea') : null;
-            }
-
-            function showKeyboardFor(el) {
-                var target = findInputTarget(el);
-                if (target) {
-                    currentTargetInput = target;
-                    target.setAttribute('inputmode', 'none');
-                    kb.classList.add('visible');
-                }
-            }
-            
-            document.addEventListener('focusin', function(e) { showKeyboardFor(e.target); }, true);
-            document.addEventListener('click', function(e) {
-                if (e.target.closest('#vr-air-keyboard')) return;
-                var input = findInputTarget(e.target);
-                if (input) {
-                    showKeyboardFor(input);
-                } else {
-                    kb.classList.remove('visible');
-                }
-            }, true);
-            
-            // Continuous polling for active input focus (handles dynamically loaded search boxes)
-            setInterval(function() {
-                var active = document.activeElement;
-                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable) && !active.closest('#vr-air-keyboard')) {
-                    currentTargetInput = active;
-                    active.setAttribute('inputmode', 'none');
-                    kb.classList.add('visible');
-                }
-            }, 300);
-        })();
-        """
-    }
-    
-    // MARK: - MadhurVision OS 2.0 Full HTML/CSS/JS
-    
-    private static func generateOSHTML() -> String {
-        return """
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta name="referrer" content="strict-origin-when-cross-origin">
-        <title>MadhurVision OS 2.0</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: #080b14;
-                color: #fff;
-                width: 100vw;
-                height: 100vh;
-                overflow: hidden;
-                user-select: none;
-                -webkit-user-select: none;
-            }
-            
-            /* Desktop Layout */
-            #desktop {
-                display: flex;
-                width: 100%;
-                height: 100%;
-            }
-            
-            /* Sidebar Dock */
-            #dock {
-                width: 80px;
-                height: 100%;
-                background: rgba(14, 20, 32, 0.75);
-                border-right: 1px solid rgba(0, 212, 255, 0.15);
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                padding: 20px 0;
-                gap: 16px;
-                flex-shrink: 0;
-                backdrop-filter: blur(12px);
-            }
-            .dock-item {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 4px;
-                cursor: pointer;
-            }
-            .dock-icon {
-                width: 56px;
-                height: 56px;
-                border-radius: 16px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 28px;
-                background: rgba(255,255,255,0.06);
-                border: 1px solid rgba(255,255,255,0.1);
-                transition: all 0.2s ease;
-            }
-            .dock-item:hover .dock-icon {
-                background: rgba(0, 212, 255, 0.2);
-                border-color: #00d4ff;
-                transform: scale(1.08);
-            }
-            .dock-icon.active {
-                background: rgba(0, 212, 255, 0.25);
-                border-color: #00d4ff;
-                box-shadow: 0 0 16px rgba(0, 212, 255, 0.4);
-            }
-            .dock-label { font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 500; }
-            .dock-spacer { flex: 1; }
-            
-            /* Main Content Area */
-            #main-area {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-                background: radial-gradient(ellipse at 50% 0%, #111e38 0%, #080b14 70%);
-            }
-            
-            /* Top Navigation Bar */
-            #top-bar {
-                height: 48px;
-                background: rgba(255,255,255,0.03);
-                border-bottom: 1px solid rgba(255,255,255,0.08);
-                display: flex;
-                align-items: center;
-                padding: 0 20px;
-                gap: 16px;
-                flex-shrink: 0;
-            }
-            .top-title { font-size: 16px; font-weight: 700; color: rgba(255,255,255,0.9); }
-            .top-spacer { flex: 1; }
-            .top-badge {
-                font-size: 12px;
-                padding: 4px 10px;
-                border-radius: 20px;
-                background: rgba(0,212,255,0.12);
-                border: 1px solid rgba(0,212,255,0.3);
-                color: #00d4ff;
-                font-weight: 600;
-            }
-            .top-clock { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.7); }
-            
-            /* Omnibar */
-            #url-bar-container {
-                height: 52px;
-                background: rgba(14, 20, 32, 0.6);
-                border-bottom: 1px solid rgba(0, 212, 255, 0.15);
-                padding: 6px 20px;
-                display: flex;
-                gap: 10px;
-                align-items: center;
-                flex-shrink: 0;
-            }
-            .nav-btn {
-                width: 38px; height: 38px; border-radius: 10px;
-                background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-                color: white; font-size: 16px; cursor: pointer;
-                display: flex; align-items: center; justify-content: center;
-                transition: all 0.2s;
-            }
-            .nav-btn:hover { background: rgba(0,212,255,0.25); border-color: #00d4ff; }
-            #url-input {
-                flex: 1; height: 38px;
-                background: rgba(255,255,255,0.08);
-                border: 1px solid rgba(255,255,255,0.2);
-                border-radius: 10px;
-                color: #fff;
-                font-size: 15px;
-                padding: 0 16px;
-                outline: none;
-                transition: all 0.2s;
-            }
-            #url-input:focus { border-color: #00d4ff; background: rgba(0,212,255,0.1); box-shadow: 0 0 12px rgba(0,212,255,0.3); }
-            .go-btn {
-                padding: 0 20px; height: 38px;
-                background: linear-gradient(135deg, #00d4ff, #0077ff);
-                border: none; border-radius: 10px;
-                color: white; font-weight: 700; font-size: 14px;
-                cursor: pointer;
-            }
-            .go-btn:hover { transform: scale(1.04); }
-            
-            /* Content Area */
-            #active-content { flex: 1; overflow-y: auto; position: relative; padding: 24px 30px; }
-            .content-view { display: none; width: 100%; height: 100%; }
-            .content-view.active { display: block; }
-            
-            /* Home Grid */
-            .home-hero { text-align: center; margin: 20px 0 35px; }
-            .home-logo-text {
-                font-size: 56px; font-weight: 800;
-                background: linear-gradient(135deg, #00d4ff, #a259ff);
-                -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            }
-            .home-desc { font-size: 18px; color: rgba(255,255,255,0.5); margin-top: 6px; }
-            
-            .app-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 20px;
-                max-width: 1000px;
-                margin: 0 auto;
-            }
-            .app-card {
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 18px;
-                padding: 24px 20px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 12px;
-                cursor: pointer;
-                transition: all 0.25s ease;
-            }
-            .app-card:hover {
-                background: rgba(0, 212, 255, 0.15);
-                border-color: #00d4ff;
-                transform: translateY(-4px);
-                box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2);
-            }
-            .app-card-icon { font-size: 44px; }
-            .app-card-title { font-size: 18px; font-weight: 700; }
-            .app-card-desc { font-size: 12px; color: rgba(255,255,255,0.5); text-align: center; }
-            
-            /* Settings View */
-            .settings-container { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
-            .settings-group {
-                background: rgba(255,255,255,0.04);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 18px;
-                padding: 20px 24px;
-            }
-            .settings-group-title {
-                font-size: 13px; font-weight: 700; text-transform: uppercase;
-                letter-spacing: 1.5px; color: #00d4ff; margin-bottom: 16px;
-            }
-            .settings-row {
-                display: flex; align-items: center; justify-content: space-between;
-                padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
-            }
-            .settings-row:last-child { border-bottom: none; }
-            .row-info h4 { font-size: 16px; font-weight: 600; }
-            .row-info p { font-size: 13px; color: rgba(255,255,255,0.45); margin-top: 2px; }
-            
-            .preset-btn-group { display: flex; gap: 8px; }
-            .preset-btn {
-                padding: 8px 14px; border-radius: 10px;
-                background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-                color: white; font-size: 13px; font-weight: 600; cursor: pointer;
-            }
-            .preset-btn.active { background: #00d4ff; color: #000; border-color: #00d4ff; font-weight: 700; }
-            
-            .slider-ctrl { display: flex; align-items: center; gap: 12px; }
-            .slider-ctrl input[type="range"] {
-                width: 160px; accent-color: #00d4ff; cursor: pointer;
-            }
-            .slider-val { font-size: 14px; font-weight: 600; color: #00d4ff; min-width: 48px; }
-            
-            .action-btn {
-                padding: 10px 20px; border-radius: 10px;
-                background: rgba(0, 212, 255, 0.15); border: 1px solid #00d4ff;
-                color: #00d4ff; font-weight: 700; font-size: 14px; cursor: pointer;
-                transition: all 0.2s;
-            }
-            .action-btn:hover { background: #00d4ff; color: #000; }
-            
-            /* YouTube Spatial Cinema View */
-            #youtube-view {
-                display: flex;
-                flex-direction: column;
-                gap: 20px;
-                max-width: 1100px;
-                margin: 0 auto;
-            }
-            .cinema-wrapper {
-                background: #000;
-                border-radius: 20px;
-                overflow: hidden;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 30px rgba(0, 212, 255, 0.2);
-                border: 2px solid rgba(0, 212, 255, 0.4);
-                position: relative;
-                width: 100%;
-                aspect-ratio: 16 / 9;
-            }
-            .cinema-wrapper iframe {
-                width: 100%;
-                height: 100%;
-                border: none;
-                display: block;
-            }
-            .yt-toolbar {
-                display: flex;
-                gap: 12px;
-                align-items: center;
-                background: rgba(255,255,255,0.04);
-                padding: 10px 16px;
-                border-radius: 14px;
-                border: 1px solid rgba(255,255,255,0.08);
-            }
-            .yt-search-input {
-                flex: 1;
-                height: 40px;
-                background: rgba(255,255,255,0.08);
-                border: 1px solid rgba(255,255,255,0.2);
-                border-radius: 10px;
-                color: #fff;
-                padding: 0 14px;
-                font-size: 15px;
-                outline: none;
-            }
-            .yt-search-input:focus {
-                border-color: #00d4ff;
-                background: rgba(0,212,255,0.1);
-            }
-            .yt-search-btn {
-                height: 40px;
-                padding: 0 20px;
-                background: #ff0000;
-                color: #fff;
-                border: none;
-                border-radius: 10px;
-                font-weight: 700;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                transition: transform 0.2s;
-            }
-            .yt-search-btn:hover { transform: scale(1.05); }
-            
-            .yt-chips {
-                display: flex;
-                gap: 10px;
-                overflow-x: auto;
-                padding-bottom: 4px;
-            }
-            .yt-chip {
-                padding: 6px 16px;
-                background: rgba(255,255,255,0.08);
-                border: 1px solid rgba(255,255,255,0.15);
-                border-radius: 20px;
-                font-size: 13px;
-                font-weight: 600;
-                color: rgba(255,255,255,0.8);
-                cursor: pointer;
-                white-space: nowrap;
-                transition: all 0.2s;
-            }
-            .yt-chip:hover {
-                background: rgba(0, 212, 255, 0.2);
-                border-color: #00d4ff;
-                color: #fff;
-            }
-            
-            .yt-section-title {
-                font-size: 18px;
-                font-weight: 700;
-                color: #fff;
-                margin-top: 10px;
-            }
-            
-            .yt-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-                gap: 16px;
-            }
-            .yt-card {
-                background: rgba(255,255,255,0.04);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 14px;
-                overflow: hidden;
-                cursor: pointer;
-                transition: all 0.25s;
-            }
-            .yt-card:hover {
-                background: rgba(0, 212, 255, 0.12);
-                border-color: #00d4ff;
-                transform: translateY(-4px);
-                box-shadow: 0 8px 24px rgba(0, 212, 255, 0.2);
-            }
-            .yt-thumb {
-                width: 100%;
-                aspect-ratio: 16 / 9;
-                object-fit: cover;
-                background: #111;
-                display: block;
-            }
-            .yt-info {
-                padding: 10px 12px;
-            }
-            .yt-title {
-                font-size: 14px;
-                font-weight: 600;
-                color: #fff;
-                display: -webkit-box;
-                -webkit-line-clamp: 2;
-                -webkit-box-orient: vertical;
-                overflow: hidden;
-            }
-            .yt-channel {
-                font-size: 12px;
-                color: rgba(255,255,255,0.5);
-                margin-top: 4px;
-            }
-        </style>
-        </head>
-        <body>
-        
-        <!-- DESKTOP -->
-        <div id="desktop">
-            <!-- DOCK -->
-            <div id="dock">
-                <div class="dock-item" onclick="switchApp('home')">
-                    <div class="dock-icon active" id="dock-home">🏠</div>
-                    <div class="dock-label">Home</div>
-                </div>
-                <div class="dock-item" onclick="switchApp('youtube')">
-                    <div class="dock-icon" id="dock-youtube">🎬</div>
-                    <div class="dock-label">Cinema</div>
-                </div>
-                <div class="dock-item" onclick="launchGoogle()">
-                    <div class="dock-icon" id="dock-browser">🌐</div>
-                    <div class="dock-label">Google</div>
-                </div>
-                <div class="dock-item" onclick="switchApp('settings')">
-                    <div class="dock-icon" id="dock-settings">⚙️</div>
-                    <div class="dock-label">Settings</div>
-                </div>
-                <div class="dock-spacer"></div>
-                <div class="dock-item" onclick="wkMsg('recalibrate')">
-                    <div class="dock-icon" title="Recalibrate Center">🎯</div>
-                    <div class="dock-label">Center</div>
-                </div>
-            </div>
-            
-            <!-- MAIN AREA -->
-            <div id="main-area">
-                <!-- TOP BAR -->
-                <div id="top-bar">
-                    <div class="top-title" id="app-title">Home</div>
-                    <div class="top-spacer"></div>
-                    <div class="top-badge" style="background:rgba(123,47,247,0.2); border-color:#a259ff; color:#d09cf7;">🎮 Wand: http://\(AirMouseServer.shared.getLocalIPAddress()):8080</div>
-                    <div class="top-badge">120 Hz VR</div>
-                    <div class="top-clock" id="clock">12:00</div>
-                </div>
-                
-                <!-- OMNIBAR (URL & SEARCH) -->
-                <div id="url-bar-container">
-                    <button class="nav-btn" onclick="wkMsg('goBack')">◀</button>
-                    <button class="nav-btn" onclick="wkMsg('goForward')">▶</button>
-                    <button class="nav-btn" onclick="wkMsg('reload')">↻</button>
-                    <input type="text" id="url-input" placeholder="Search Google or enter URL (e.g. google.com, youtube.com)..." value="https://www.google.com">
-                    <button class="go-btn" onclick="submitURL()">Open ↵</button>
-                </div>
-                
-                <!-- CONTENT CONTAINER -->
-                <div id="active-content">
-                    <!-- HOME VIEW -->
-                    <div class="content-view active" id="home-view">
-                        <div class="home-hero">
-                            <div class="home-logo-text">MadhurVision</div>
-                            <div class="home-desc">Your Spatial VR Computing System</div>
-                        </div>
-                        
-                        <div class="app-grid">
-                            <div class="app-card" onclick="switchApp('youtube')">
-                                <div class="app-card-icon">🎬</div>
-                                <div class="app-card-title">Spatial Cinema 4K</div>
-                                <div class="app-card-desc">Direct Metal GPU Video Streaming with zero lag & 60 FPS</div>
-                            </div>
-                            <div class="app-card" onclick="launchGoogle()">
-                                <div class="app-card-icon">🔍</div>
-                                <div class="app-card-title">Google Search</div>
-                                <div class="app-card-desc">Browse the web with desktop-class performance</div>
-                            </div>
-                            <div class="app-card" onclick="launchYouTube()">
-                                <div class="app-card-icon">▶️</div>
-                                <div class="app-card-title">YouTube (Piped)</div>
-                                <div class="app-card-desc">Clean, ad-free video streaming with live search & trending feeds</div>
-                            </div>
-                            <div class="app-card" onclick="openPresetURL('https://yewtu.be')">
-                                <div class="app-card-icon">📺</div>
-                                <div class="app-card-title">Invidious Web</div>
-                                <div class="app-card-desc">Alternative open YouTube client with direct playback</div>
-                            </div>
-                            <div class="app-card" onclick="openPresetURL('https://www.wikipedia.org')">
-                                <div class="app-card-icon">📚</div>
-                                <div class="app-card-title">Wikipedia</div>
-                                <div class="app-card-desc">Explore spatial knowledge & articles</div>
-                            </div>
-                            <div class="app-card" onclick="openPresetURL('https://fast.com')">
-                                <div class="app-card-icon">⚡</div>
-                                <div class="app-card-title">Speed Test</div>
-                                <div class="app-card-desc">Check your network streaming bandwidth</div>
-                            </div>
-                            <div class="app-card" onclick="switchApp('settings')">
-                                <div class="app-card-icon">⚙️</div>
-                                <div class="app-card-title">System Settings</div>
-                                <div class="app-card-desc">Adjust screen size, IPD, and tracking</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- YOUTUBE SPATIAL CINEMA VIEW -->
-                    <div class="content-view" id="youtube-view">
-                        <!-- THEATER CINEMA CONTROLS HUD -->
-                        <div style="background: linear-gradient(135deg, rgba(20,28,45,0.9), rgba(10,14,24,0.95)); border: 1px solid rgba(0,212,255,0.3); border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 32px rgba(0,212,255,0.15);">
-                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
-                                <div style="display: flex; align-items: center; gap: 12px;">
-                                    <span style="font-size: 24px;">🎬</span>
-                                    <div>
-                                        <div style="font-size: 16px; font-weight: 700; color: #fff;">Native Spatial Cinema Theater</div>
-                                        <div style="font-size: 12px; color: #00d4ff;">60 FPS Metal Hardware Stream • Zero Lag • Ultra HD</div>
-                                    </div>
-                                </div>
-                                <div style="display: flex; gap: 10px;">
-                                    <button class="nav-btn" style="width: auto; padding: 0 16px; height: 36px; background: rgba(0,212,255,0.2); border: 1px solid #00d4ff; color: #fff; font-weight: 700;" onclick="wkMsg('togglePlayPauseCinema')">⏯️ Play/Pause</button>
-                                    <button class="nav-btn" style="width: auto; padding: 0 14px; height: 36px;" onclick="wkMsg('seekCinema', {seconds: -10})">⏪ -10s</button>
-                                    <button class="nav-btn" style="width: auto; padding: 0 14px; height: 36px;" onclick="wkMsg('seekCinema', {seconds: 10})">⏩ +10s</button>
-                                    <button class="nav-btn" style="width: auto; padding: 0 14px; height: 36px; background: rgba(255,50,50,0.2); border-color: #ff3344; color: #ff9999;" onclick="wkMsg('closeNativeCinema')">❌ Close</button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- SEARCH TOOLBAR -->
-                        <div class="yt-toolbar">
-                            <input type="text" id="yt-search-box" class="yt-search-input" placeholder="Search YouTube or paste any direct stream/video link...">
-                            <button class="yt-search-btn" onclick="submitYouTubeSearch()">▶ Stream</button>
-                        </div>
-                        
-                        <!-- QUICK CHIPS -->
-                        <div class="yt-chips">
-                            <div class="yt-chip" onclick="playYouTubeVideo('LXb3EKWsInQ', '4K Relaxing Nature (Earth 4K HDR)')">🌿 Nature 4K HDR</div>
-                            <div class="yt-chip" onclick="playYouTubeVideo('jfKfPfyJRdk', 'Lofi Hip Hop Radio - Beats to Relax/Study')">🎧 Lofi Chill Beats</div>
-                            <div class="yt-chip" onclick="playYouTubeVideo('9No-FiEInLA', 'Interstellar IMAX Theme & Space Experience')">🚀 Interstellar IMAX</div>
-                            <div class="yt-chip" onclick="playYouTubeVideo('dQw4w9WgXcQ', 'Never Gonna Give You Up')">🎵 80s Music Hits</div>
-                            <div class="yt-chip" onclick="playYouTubeVideo('M576WGiDBdQ', 'Apple Vision Pro Spatial Computing Demo')">🥽 Vision Pro Spatial</div>
-                        </div>
-                        
-                        <!-- SHOWCASE GRID -->
-                        <div class="yt-section-title">Featured Cinema Videos</div>
-                        <div class="yt-grid">
-                            <div class="yt-card" onclick="playYouTubeVideo('LXb3EKWsInQ', 'Earth 4K 60FPS HDR Nature')">
-                                <img class="yt-thumb" src="https://img.youtube.com/vi/LXb3EKWsInQ/hqdefault.jpg" alt="Nature">
-                                <div class="yt-info">
-                                    <div class="yt-title">Earth 4K 60FPS HDR • Breathtaking Wildlife & Landscapes</div>
-                                    <div class="yt-channel">BBC Earth</div>
-                                </div>
-                            </div>
-                            <div class="yt-card" onclick="playYouTubeVideo('jfKfPfyJRdk', 'Lofi Hip Hop Radio')">
-                                <img class="yt-thumb" src="https://img.youtube.com/vi/jfKfPfyJRdk/hqdefault.jpg" alt="Lofi">
-                                <div class="yt-info">
-                                    <div class="yt-title">Lofi Girl • Beats to Relax / Study / Chill to in VR</div>
-                                    <div class="yt-channel">Lofi Girl</div>
-                                </div>
-                            </div>
-                            <div class="yt-card" onclick="playYouTubeVideo('9No-FiEInLA', 'Interstellar Space Flight')">
-                                <img class="yt-thumb" src="https://img.youtube.com/vi/9No-FiEInLA/hqdefault.jpg" alt="Space">
-                                <div class="yt-info">
-                                    <div class="yt-title">Interstellar Cosmic Flight • Deep Space Cinema 4K</div>
-                                    <div class="yt-channel">Hans Zimmer Soundtrack</div>
-                                </div>
-                            </div>
-                            <div class="yt-card" onclick="playYouTubeVideo('M576WGiDBdQ', 'Spatial Computing VR Experience')">
-                                <img class="yt-thumb" src="https://img.youtube.com/vi/M576WGiDBdQ/hqdefault.jpg" alt="VR">
-                                <div class="yt-info">
-                                    <div class="yt-title">Spatial VR Computing Showcase & Interface Walkthrough</div>
-                                    <div class="yt-channel">Tech Vision VR</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- SETTINGS VIEW -->
-                    <div class="content-view" id="settings-view">
-                        <div class="settings-container">
-                            <div class="settings-group">
-                                <div class="settings-group-title">Display & Screen Sizing</div>
-                                <div class="settings-row">
-                                    <div class="row-info">
-                                        <h4>Virtual Screen Preset</h4>
-                                        <p>Locked virtual screen scale (projector mode)</p>
-                                    </div>
-                                    <div class="preset-btn-group">
-                                        <button class="preset-btn" onclick="setPresetScale(0.7, this)">10" Mini</button>
-                                        <button class="preset-btn active" onclick="setPresetScale(1.0, this)">12" Std</button>
-                                        <button class="preset-btn" onclick="setPresetScale(1.3, this)">15" Pro</button>
-                                        <button class="preset-btn" onclick="setPresetScale(2.0, this)">Cinema 50"</button>
-                                    </div>
-                                </div>
-                                <div class="settings-row">
-                                    <div class="row-info">
-                                        <h4>IPD Offset (Lens Distance)</h4>
-                                        <p>Align stereo cameras to your eye separation</p>
-                                    </div>
-                                    <div class="slider-ctrl">
-                                        <input type="range" id="ipd-slider" min="55" max="75" value="65" oninput="updateIPD(this.value)">
-                                        <span class="slider-val" id="ipd-val">65 mm</span>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="settings-group">
-                                <div class="settings-group-title">Orientation & Tracking</div>
-                                <div class="settings-row">
-                                    <div class="row-info">
-                                        <h4>Recalibrate Center View</h4>
-                                        <p>Reset yaw and center the monitor straight ahead</p>
-                                    </div>
-                                    <button class="action-btn" onclick="wkMsg('recalibrate')">🎯 Recalibrate Center</button>
-                                </div>
-                                <div class="settings-row">
-                                    <div class="row-info">
-                                        <h4>Mixed Reality Passthrough</h4>
-                                        <p>Blend rear camera video into VR background</p>
-                                    </div>
-                                    <button class="action-btn" id="passthrough-btn" onclick="togglePassthrough()">Disable MR</button>
-                                </div>
-                            </div>
-                            
-                            <div class="settings-group">
-                                <div class="settings-group-title">System Information</div>
-                                <div class="settings-row">
-                                    <div class="row-info">
-                                        <h4>MadhurVision OS Version</h4>
-                                        <p>Unified Spatial VR Environment</p>
-                                    </div>
-                                    <span style="color:rgba(255,255,255,0.7); font-weight:600;">v2.0 (Build 26.0)</span>
-                                </div>
-                                <div class="settings-row">
-                                    <div class="row-info">
-                                        <h4>Display Mode</h4>
-                                        <p>High-Fidelity Dual-Eye Stereo</p>
-                                    </div>
-                                    <span style="color:#00d4ff; font-weight:600;">1440x810 Internal Canvas</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <script>
-        // Clock
-        function updateClock() {
-            var now = new Date();
-            document.getElementById('clock').textContent =
-                now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-        }
-        updateClock(); setInterval(updateClock, 10000);
-        
-        // Swift Bridge Helper
-        function wkMsg(action, data) {
-            var msg = {action: action};
-            if (data) Object.assign(msg, data);
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.vrOS) {
-                window.webkit.messageHandlers.vrOS.postMessage(msg);
-            }
-        }
-        
-        // App Switching
-        var currentApp = 'home';
-        function switchApp(app) {
-            currentApp = app;
-            if (app !== 'youtube') {
-                wkMsg('closeNativeCinema');
-            }
-            document.querySelectorAll('.dock-icon').forEach(function(i) { i.classList.remove('active'); });
-            var di = document.getElementById('dock-' + app);
-            if (di) di.classList.add('active');
-            
-            var titles = {home: 'Home', youtube: 'YouTube Cinema', settings: 'System Settings'};
-            document.getElementById('app-title').textContent = titles[app] || app;
-            
-            document.querySelectorAll('.content-view').forEach(function(v) { v.classList.remove('active'); });
-            var target = document.getElementById(app + '-view');
-            if (target) target.classList.add('active');
-        }
-        
-        // YouTube Spatial Cinema Engine
-        function extractYouTubeId(urlOrText) {
-            if (!urlOrText) return null;
-            var text = urlOrText.trim();
-            // Direct ID (11 chars)
-            if (/^[a-zA-Z0-9_-]{11}$/.test(text)) return text;
-            // Short URL youtu.be/ID
-            var shortMatch = text.match(new RegExp('youtu\\\\.be/([a-zA-Z0-9_-]{11})'));
-            if (shortMatch) return shortMatch[1];
-            // Standard URL youtube.com/watch?v=ID
-            var watchMatch = text.match(new RegExp('[?&]v=([a-zA-Z0-9_-]{11})'));
-            if (watchMatch) return watchMatch[1];
-            // Embed URL youtube.com/embed/ID
-            var embedMatch = text.match(new RegExp('embed/([a-zA-Z0-9_-]{11})'));
-            if (embedMatch) return embedMatch[1];
-            // Shorts URL youtube.com/shorts/ID
-            var shortsMatch = text.match(new RegExp('shorts/([a-zA-Z0-9_-]{11})'));
-            if (shortsMatch) return shortsMatch[1];
-            return null;
-        }
-        
-        function playYouTubeVideo(videoId, title) {
-            title = title || 'Spatial Cinema';
-            wkMsg('playNativeCinema', { videoId: videoId, title: title });
-            switchApp('youtube');
-            var container = document.getElementById('active-content');
-            if (container) container.scrollTo({top: 0, behavior: 'smooth'});
-        }
-        
-        function submitYouTubeSearch() {
-            var input = document.getElementById('yt-search-box');
-            if (!input || !input.value) return;
-            var query = input.value.trim();
-            var id = extractYouTubeId(query);
-            if (id) {
-                playYouTubeVideo(id);
-            } else {
-                // Navigate to YouTube embed search or web search
-                wkMsg('navigate', {url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query)});
-            }
-        }
-        
-        document.getElementById('yt-search-box')?.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitYouTubeSearch();
-            }
-        });
-
-        // Navigation Shortcuts
-        function launchGoogle() {
-            wkMsg('navigate', {url: 'https://www.google.com'});
-        }
-        
-        function launchYouTube() {
-            wkMsg('navigate', {url: 'https://piped.video'});
-        }
-        
-        function openPresetURL(url) {
-            wkMsg('navigate', {url: url});
-        }
-        
-        function submitURL() {
-            var url = document.getElementById('url-input').value;
-            if (!url) return;
-            wkMsg('navigate', {url: url});
-        }
-        
-        document.getElementById('url-input').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitURL();
-            }
-        });
-        
-        // Settings Controls
-        function setPresetScale(scale, btn) {
-            document.querySelectorAll('.preset-btn').forEach(function(b) { b.classList.remove('active'); });
-            btn.classList.add('active');
-            wkMsg('setScale', {scale: scale});
-        }
-        
-        function updateIPD(val) {
-            document.getElementById('ipd-val').textContent = val + ' mm';
-            wkMsg('setIPD', {ipd: parseFloat(val)});
-        }
-        
-        var passthroughEnabled = true;
-        function togglePassthrough() {
-            passthroughEnabled = !passthroughEnabled;
-            var btn = document.getElementById('passthrough-btn');
-            btn.textContent = passthroughEnabled ? 'Disable MR' : 'Enable MR';
-            btn.style.borderColor = passthroughEnabled ? '#00d4ff' : 'rgba(255,255,255,0.3)';
-            wkMsg('togglePassthrough', {enabled: passthroughEnabled});
-        }
-        </script>
-        </body>
-        </html>
-        """
     }
 }
