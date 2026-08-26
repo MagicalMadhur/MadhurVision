@@ -481,6 +481,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             
             // Assign SpriteKit dynamic video texture to SCNMaterial
             self.geometry?.firstMaterial?.diffuse.contents = skScene
+            videoNode.play()
             player.play()
             
             AppLogger.shared.log("[VRMonitorNode] Native AVPlayer Spatial Cinema started for \(title): \(url.absoluteString)")
