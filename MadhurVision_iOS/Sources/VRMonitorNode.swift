@@ -2,6 +2,7 @@ import SceneKit
 import WebKit
 import UIKit
 import AVFoundation
+import SpriteKit
 
 /// A single unified floating monitor in VR space.
 /// Features:
@@ -446,11 +447,17 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         }.resume()
     }
     
+    private var videoSKNode: SKVideoNode?
+    private var videoSKScene: SKScene?
+    
     func startAVPlayerStreaming(url: URL, title: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
             self.cinemaPlayer?.pause()
+            self.videoSKNode?.removeFromParent()
+            self.videoSKNode = nil
+            self.videoSKScene = nil
             
             let playerItem = AVPlayerItem(url: url)
             let player = AVPlayer(playerItem: playerItem)
@@ -458,9 +465,22 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             self.cinemaPlayer = player
             self.isCinemaMode = true
             
-            // DIRECT HARDWARE METAL TEXTURE ATTACHMENT:
-            // SceneKit renders the AVPlayer directly on the 3D plane at 60/120 FPS!
-            self.geometry?.firstMaterial?.diffuse.contents = player
+            // Create SpriteKit Video Texture for SceneKit
+            let sceneSize = CGSize(width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
+            let skScene = SKScene(size: sceneSize)
+            skScene.backgroundColor = .black
+            
+            let videoNode = SKVideoNode(avPlayer: player)
+            videoNode.size = sceneSize
+            videoNode.position = CGPoint(x: sceneSize.width / 2.0, y: sceneSize.height / 2.0)
+            videoNode.yScale = -1.0 // Coordinate alignment for SCNPlane texture mapping
+            
+            skScene.addChild(videoNode)
+            self.videoSKScene = skScene
+            self.videoSKNode = videoNode
+            
+            // Assign SpriteKit dynamic video texture to SCNMaterial
+            self.geometry?.firstMaterial?.diffuse.contents = skScene
             player.play()
             
             AppLogger.shared.log("[VRMonitorNode] Native AVPlayer Spatial Cinema started for \(title): \(url.absoluteString)")
@@ -472,6 +492,9 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             guard let self = self else { return }
             self.cinemaPlayer?.pause()
             self.cinemaPlayer = nil
+            self.videoSKNode?.removeFromParent()
+            self.videoSKNode = nil
+            self.videoSKScene = nil
             self.isCinemaMode = false
             self.requestSnapshot()
         }
