@@ -292,12 +292,14 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     // MARK: - Navigation
     
     func navigateTo(url: URL) {
+        exitCinemaMode()
         isShowingOS = false
         webView?.load(URLRequest(url: url))
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.requestSnapshot() }
     }
     
     func goHome() {
+        exitCinemaMode()
         isShowingOS = true
         if let html = VRMonitorNode.cachedOSHTML {
             webView?.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
@@ -306,16 +308,19 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     }
     
     func goBack() {
+        exitCinemaMode()
         webView?.goBack()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
     
     func goForward() {
+        exitCinemaMode()
         webView?.goForward()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
     
     func reload() {
+        exitCinemaMode()
         webView?.reload()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.requestSnapshot() }
     }
@@ -483,6 +488,16 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
             self.geometry?.firstMaterial?.diffuse.contents = skScene
             videoNode.play()
             player.play()
+            
+            // Auto-restore Web OS desktop when video finishes playing or errors
+            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
+            NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main) { [weak self] _ in
+                self?.exitCinemaMode()
+            }
+            NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: playerItem, queue: .main) { [weak self] _ in
+                self?.exitCinemaMode()
+            }
             
             AppLogger.shared.log("[VRMonitorNode] Native AVPlayer Spatial Cinema started for \(title): \(url.absoluteString)")
         }
@@ -1611,6 +1626,9 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         var currentApp = 'home';
         function switchApp(app) {
             currentApp = app;
+            if (app !== 'youtube') {
+                wkMsg('closeNativeCinema');
+            }
             document.querySelectorAll('.dock-icon').forEach(function(i) { i.classList.remove('active'); });
             var di = document.getElementById('dock-' + app);
             if (di) di.classList.add('active');
