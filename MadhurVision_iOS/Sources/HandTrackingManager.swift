@@ -233,14 +233,17 @@ class HandTrackingManager: NSObject {
             thumbExtended = false
         }
 
+        // Hand Chirality (Left vs Right Hand)
+        let isLeftHand = (observation.chirality == .left) || (observation.chirality == .unknown && (thumbTip?.location.x ?? 0) > indexMCP.location.x)
+
         // GESTURE 1: Grab (Closed Fist — all 4 curled + thumb folded)
         let isFist = isCurled(indexTip, indexMCP) && middleCurled && ringCurled && littleCurled && thumbFolded
 
-        // GESTURE 2: Reset (Open Palm ✋ — all fingers extended flat facing camera)
-        let isOpenPalm = indexExtended && middleExtended && ringExtended
+        // GESTURE 2: Reset (Open Palm ✋ — ONLY for LEFT HAND held flat facing camera)
+        let isLeftOpenPalm = indexExtended && middleExtended && ringExtended && isLeftHand
 
         // GESTURE 3: Two-Finger Scroll ✌️ (Index + Middle extended)
-        let isTwoFingerScroll = indexExtended && middleExtended && !isFist && !isOpenPalm
+        let isTwoFingerScroll = indexExtended && middleExtended && !isFist && !isLeftOpenPalm
 
         // PINCH / CLICK GESTURE (Index Tip + Thumb Tip touch distance)
         let thumbIndexDist = hypot(thumbPos.x - indexPos.x, thumbPos.y - indexPos.y)
@@ -251,8 +254,8 @@ class HandTrackingManager: NSObject {
             pinchReleased = true
         }
 
-        // GESTURE 4: Single-Finger Point 👆 (Active whenever not fist, not scroll, not open palm)
-        let isPointing = (!isTwoFingerScroll && !isFist && !isOpenPalm) || isPinchingFingers || pinchCooldown
+        // GESTURE 4: Single-Finger Point 👆 (Active whenever not fist, not scroll, not left open palm)
+        let isPointing = (!isTwoFingerScroll && !isFist && !isLeftOpenPalm) || isPinchingFingers || pinchCooldown
         
         let clickDetected = isPointing && isPinchingFingers && pinchReleased && !pinchCooldown && !isFist
 
@@ -308,8 +311,8 @@ class HandTrackingManager: NSObject {
             self.isGrabbing = isFist
             self.grabPosition = wristPos
 
-            // RESET COMMAND: Open Palm held for 2.0 seconds
-            if isOpenPalm {
+            // RESET COMMAND: Left Open Palm held for 2.0 seconds (Left Hand Only!)
+            if isLeftOpenPalm {
                 if self.openPalmStartedAt == nil {
                     self.openPalmStartedAt = Date()
                 }
