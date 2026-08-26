@@ -180,7 +180,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         
         let config = WKSnapshotConfiguration()
         config.rect = webView.bounds
-        config.afterScreenUpdates = false
+        config.afterScreenUpdates = true
         
         webView.takeSnapshot(with: config) { [weak self] image, error in
             guard let self = self else { return }
