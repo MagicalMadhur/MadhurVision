@@ -160,6 +160,12 @@ public final class VRMonitorNode: SCNNode {
         return CGPoint(x: u, y: v)
     }
     
+    // MARK: - Snapshot Application
+    public func applySnapshot(_ image: UIImage) {
+        guard !isCinemaMode else { return }
+        geometry?.firstMaterial?.diffuse.contents = image
+    }
+    
     // MARK: - Native Click Dispatcher
     public func simulateClick(at uv: CGPoint) {
         let pixelX = uv.x * VRMonitorNode.canvasWidth
