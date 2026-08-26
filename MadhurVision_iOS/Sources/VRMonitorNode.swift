@@ -1427,8 +1427,13 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                             </div>
                             <div class="app-card" onclick="launchYouTube()">
                                 <div class="app-card-icon">▶️</div>
-                                <div class="app-card-title">YouTube</div>
-                                <div class="app-card-desc">Watch videos in giant cinema theater screen</div>
+                                <div class="app-card-title">YouTube (Piped)</div>
+                                <div class="app-card-desc">Clean, ad-free video streaming with live search & trending feeds</div>
+                            </div>
+                            <div class="app-card" onclick="openPresetURL('https://yewtu.be')">
+                                <div class="app-card-icon">📺</div>
+                                <div class="app-card-title">Invidious Web</div>
+                                <div class="app-card-desc">Alternative open YouTube client with direct playback</div>
                             </div>
                             <div class="app-card" onclick="openPresetURL('https://www.wikipedia.org')">
                                 <div class="app-card-icon">📚</div>
@@ -1695,7 +1700,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         }
         
         function launchYouTube() {
-            wkMsg('navigate', {url: 'https://m.youtube.com'});
+            wkMsg('navigate', {url: 'https://piped.video'});
         }
         
         function openPresetURL(url) {
