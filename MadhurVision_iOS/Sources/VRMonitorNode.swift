@@ -201,6 +201,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     /// Must be called from VREngine.renderer(_:updateAtTime:) once the node
     /// belongs to a live scene.
     func applySnapshot(_ image: UIImage) {
+        guard !isCinemaMode else { return }
         geometry?.firstMaterial?.diffuse.contents = image
     }
     
@@ -1323,13 +1324,13 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                     <div class="dock-icon active" id="dock-home">🏠</div>
                     <div class="dock-label">Home</div>
                 </div>
+                <div class="dock-item" onclick="switchApp('youtube')">
+                    <div class="dock-icon" id="dock-youtube">🎬</div>
+                    <div class="dock-label">Cinema</div>
+                </div>
                 <div class="dock-item" onclick="launchGoogle()">
                     <div class="dock-icon" id="dock-browser">🌐</div>
                     <div class="dock-label">Google</div>
-                </div>
-                <div class="dock-item" onclick="launchYouTube()">
-                    <div class="dock-icon" id="dock-youtube">📺</div>
-                    <div class="dock-label">YouTube</div>
                 </div>
                 <div class="dock-item" onclick="switchApp('settings')">
                     <div class="dock-icon" id="dock-settings">⚙️</div>
@@ -1372,6 +1373,11 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                         </div>
                         
                         <div class="app-grid">
+                            <div class="app-card" onclick="switchApp('youtube')">
+                                <div class="app-card-icon">🎬</div>
+                                <div class="app-card-title">Spatial Cinema 4K</div>
+                                <div class="app-card-desc">Direct Metal GPU Video Streaming with zero lag & 60 FPS</div>
+                            </div>
                             <div class="app-card" onclick="launchGoogle()">
                                 <div class="app-card-icon">🔍</div>
                                 <div class="app-card-title">Google Search</div>
@@ -1391,11 +1397,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                                 <div class="app-card-icon">📚</div>
                                 <div class="app-card-title">Wikipedia</div>
                                 <div class="app-card-desc">Explore spatial knowledge & articles</div>
-                            </div>
-                            <div class="app-card" onclick="openPresetURL('https://www.reddit.com')">
-                                <div class="app-card-icon">💬</div>
-                                <div class="app-card-title">Reddit</div>
-                                <div class="app-card-desc">Community discussions & news</div>
                             </div>
                             <div class="app-card" onclick="openPresetURL('https://fast.com')">
                                 <div class="app-card-icon">⚡</div>
