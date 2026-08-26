@@ -201,7 +201,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
     /// Must be called from VREngine.renderer(_:updateAtTime:) once the node
     /// belongs to a live scene.
     func applySnapshot(_ image: UIImage) {
-        guard !isCinemaMode else { return }
         geometry?.firstMaterial?.diffuse.contents = image
     }
     
@@ -1696,7 +1695,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         }
         
         function launchYouTube() {
-            switchApp('youtube');
+            wkMsg('navigate', {url: 'https://m.youtube.com'});
         }
         
         function openPresetURL(url) {
@@ -1706,12 +1705,7 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         function submitURL() {
             var url = document.getElementById('url-input').value;
             if (!url) return;
-            var ytId = extractYouTubeId(url);
-            if (ytId) {
-                playYouTubeVideo(ytId);
-            } else {
-                wkMsg('navigate', {url: url});
-            }
+            wkMsg('navigate', {url: url});
         }
         
         document.getElementById('url-input').addEventListener('keydown', function(e) {
