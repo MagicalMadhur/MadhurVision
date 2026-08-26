@@ -962,53 +962,12 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
                 -webkit-user-select: none;
             }
             
-            /* Loading Screen */
-            #loading-screen {
-                position: fixed;
-                inset: 0;
-                background: radial-gradient(circle at center, #10192e 0%, #080b14 100%);
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                z-index: 10000;
-                transition: opacity 0.5s ease;
-            }
-            #loading-screen.hidden { opacity: 0; pointer-events: none; }
-            .loading-title {
-                font-size: 60px;
-                font-weight: 800;
-                letter-spacing: 2px;
-                background: linear-gradient(135deg, #00d4ff, #7b2ff7, #ff007f);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                margin-bottom: 12px;
-            }
-            .loading-sub {
-                font-size: 20px;
-                color: rgba(255,255,255,0.6);
-                margin-bottom: 36px;
-            }
-            .loading-bar-track {
-                width: 320px; height: 6px;
-                background: rgba(255,255,255,0.1);
-                border-radius: 3px; overflow: hidden;
-            }
-            .loading-bar-fill {
-                height: 100%; width: 0%;
-                background: linear-gradient(90deg, #00d4ff, #7b2ff7);
-                border-radius: 3px;
-                animation: loadFill 1.8s cubic-bezier(0.1, 0.7, 0.1, 1) forwards;
-            }
-            @keyframes loadFill { 0%{width:0%} 100%{width:100%} }
-            
             /* Desktop Layout */
             #desktop {
-                display: none;
+                display: flex;
                 width: 100%;
                 height: 100%;
             }
-            #desktop.visible { display: flex; }
             
             /* Sidebar Dock */
             #dock {
@@ -1356,13 +1315,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         </head>
         <body>
         
-        <!-- LOADING SCREEN -->
-        <div id="loading-screen">
-            <div class="loading-title">MadhurVision</div>
-            <div class="loading-sub">MadhurVision OS 2.0 • Ultra HD VR</div>
-            <div class="loading-bar-track"><div class="loading-bar-fill"></div></div>
-        </div>
-        
         <!-- DESKTOP -->
         <div id="desktop">
             <!-- DOCK -->
@@ -1599,16 +1551,6 @@ class VRMonitorNode: SCNNode, WKScriptMessageHandler, WKNavigationDelegate {
         </div>
         
         <script>
-        // Boot Sequence
-        setTimeout(function() {
-            var loader = document.getElementById('loading-screen');
-            if (loader) loader.classList.add('hidden');
-            setTimeout(function() {
-                if (loader) loader.style.display = 'none';
-                document.getElementById('desktop').classList.add('visible');
-            }, 500);
-        }, 1200);
-        
         // Clock
         function updateClock() {
             var now = new Date();
