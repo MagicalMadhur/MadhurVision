@@ -168,6 +168,8 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     let rightCameraNode = SCNNode()
     
     @Published var monitorScale: CGFloat = 1.0
+    @Published var lensCenterOffset: CGFloat = 34.0
+    @Published var ipd: Float = 0.063
     var onExit: (() -> Void)?
     
     private let cameraRig   = SCNNode()
@@ -221,9 +223,6 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     
     // Monitor distance in front of user
     private let monitorDistance: Float = -2.0
-    
-    // IPD in meters (default 65mm)
-    private var ipd: Float = 0.065
     
     // Reference attitude for bulletproof zero-calibration
     private var referenceAttitude: CMAttitude?
