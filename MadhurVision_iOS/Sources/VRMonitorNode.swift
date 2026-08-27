@@ -48,9 +48,11 @@ public final class VRMonitorNode: SCNNode {
     public var onPassthroughToggled: ((Bool) -> Void)?
     public var onExitVRRequested: (() -> Void)?
     public var onSnapshotImage: ((UIImage) -> Void)?
+    public var onLensOffsetChanged: ((CGFloat, Float) -> Void)?
     
     public var currentScale: CGFloat = 1.0
-    public var currentIPD: Float = 0.065
+    public var currentIPD: Float = 0.063
+    public var currentLensOffset: CGFloat = 34.0
     public var isPassthroughActive: Bool = false
     
     // MARK: - Curated 4K Cinema Video Catalog
@@ -619,7 +621,46 @@ public final class VRMonitorNode: SCNNode {
         }
         y += 70
         
-        // SECTION 2: Orientation & Head Recalibration
+        // SECTION 2: Stereo Lens Alignment (IPD & Screen Inset)
+        let lTitle = "Stereo Lens Alignment (Eye Separation & 3D Merging)"
+        (lTitle as NSString).draw(at: CGPoint(x: containerRect.minX + 30, y: y), withAttributes: [.font: UIFont.systemFont(ofSize: 20, weight: .bold), .foregroundColor: UIColor.white])
+        y += 40
+        
+        let lensPresets: [(title: String, offset: CGFloat, ipd: Float)] = [
+            ("58mm Narrow", 48.0, 0.058),
+            ("63mm Std Max", 34.0, 0.063),
+            ("68mm Wide", 18.0, 0.068),
+            ("72mm Ultra", 4.0, 0.072)
+        ]
+        
+        var lBtnX = containerRect.minX + 30
+        for lp in lensPresets {
+            let bRect = CGRect(x: lBtnX, y: y, width: btnWidth, height: 44)
+            let isSel = abs(self.currentLensOffset - lp.offset) < 2.0
+            if isSel {
+                UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.9).setFill()
+            } else {
+                UIColor(white: 1.0, alpha: 0.08).setFill()
+            }
+            let bPath = UIBezierPath(roundedRect: bRect, cornerRadius: 12)
+            bPath.fill()
+            
+            let bAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 14, weight: .bold), .foregroundColor: isSel ? UIColor.black : UIColor.white]
+            let bSize = (lp.title as NSString).size(withAttributes: bAttr)
+            (lp.title as NSString).draw(at: CGPoint(x: bRect.midX - bSize.width / 2, y: bRect.midY - bSize.height / 2), withAttributes: bAttr)
+            
+            zones.append(ClickableZone(rect: bRect, action: { [weak self] in
+                guard let self = self else { return }
+                self.currentLensOffset = lp.offset
+                self.currentIPD = lp.ipd
+                self.onLensOffsetChanged?(lp.offset, lp.ipd)
+                self.renderCurrentState()
+            }))
+            lBtnX += btnWidth + 15
+        }
+        y += 70
+        
+        // SECTION 3: Orientation & Head Recalibration
         let rTitle = "Orientation & Recalibration"
         (rTitle as NSString).draw(at: CGPoint(x: containerRect.minX + 30, y: y), withAttributes: [.font: UIFont.systemFont(ofSize: 20, weight: .bold), .foregroundColor: UIColor.white])
         y += 40

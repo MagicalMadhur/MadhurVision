@@ -12,14 +12,18 @@ struct StandaloneVRView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            // Dual-Eye 120Hz SCNView Viewport
+            // Dual-Eye 120Hz SCNView Viewport with Optical Lens Center Offset
             DualEyeVRContainer(vrEngine: vrEngine)
                 .ignoresSafeArea()
             
-            // Dual Centered Crosshairs
+            // Dual Centered Crosshairs matching optical offset
             HStack(spacing: 0) {
-                Crosshair().frame(maxWidth: .infinity, maxHeight: .infinity)
-                Crosshair().frame(maxWidth: .infinity, maxHeight: .infinity)
+                Crosshair()
+                    .offset(x: vrEngine.lensCenterOffset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Crosshair()
+                    .offset(x: -vrEngine.lensCenterOffset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .allowsHitTesting(false)
         }
@@ -39,16 +43,17 @@ struct StandaloneVRView: View {
 class DualEyeContainerView: UIView {
     let leftView: SCNView
     let rightView: SCNView
+    var lensCenterOffset: CGFloat = 34.0 {
+        didSet {
+            setNeedsLayout()
+            layoutIfNeeded()
+        }
+    }
     
-    // Camera feed is rendered INSIDE SceneKit via scene.background.contents,
-    // not as a separate CALayer behind the SCNViews. CAMetalLayer (used by
-    // SCNView) cannot alpha-composite with layers behind it during live GPU
-    // rendering — that's why preview layers appeared black on-screen but
-    // showed correctly in screenshots.
-    
-    init(leftView: SCNView, rightView: SCNView) {
+    init(leftView: SCNView, rightView: SCNView, lensCenterOffset: CGFloat = 34.0) {
         self.leftView = leftView
         self.rightView = rightView
+        self.lensCenterOffset = lensCenterOffset
         
         super.init(frame: .zero)
         self.backgroundColor = .black
@@ -67,8 +72,11 @@ class DualEyeContainerView: UIView {
         PassthroughManager.shared.updateOrientation(avOrientation)
         
         let halfWidth = bounds.width / 2.0
-        leftView.frame = CGRect(x: 0, y: 0, width: halfWidth, height: bounds.height)
-        rightView.frame = CGRect(x: halfWidth, y: 0, width: halfWidth, height: bounds.height)
+        // Shift left eye viewport to the right (inward towards center nose bridge)
+        leftView.frame = CGRect(x: lensCenterOffset, y: 0, width: halfWidth, height: bounds.height)
+        
+        // Shift right eye viewport to the left (inward towards center nose bridge)
+        rightView.frame = CGRect(x: halfWidth - lensCenterOffset, y: 0, width: halfWidth, height: bounds.height)
     }
 }
 
@@ -103,7 +111,7 @@ struct DualEyeVRContainer: UIViewRepresentable {
         rightView.layer.isOpaque = false
         rightView.antialiasingMode = .multisampling2X
         
-        let container = DualEyeContainerView(leftView: leftView, rightView: rightView)
+        let container = DualEyeContainerView(leftView: leftView, rightView: rightView, lensCenterOffset: vrEngine.lensCenterOffset)
         
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         container.addGestureRecognizer(tap)
@@ -114,6 +122,9 @@ struct DualEyeVRContainer: UIViewRepresentable {
     func updateUIView(_ uiView: DualEyeContainerView, context: Context) {
         uiView.leftView.pointOfView = vrEngine.leftCameraNode
         uiView.rightView.pointOfView = vrEngine.rightCameraNode
+        if uiView.lensCenterOffset != vrEngine.lensCenterOffset {
+            uiView.lensCenterOffset = vrEngine.lensCenterOffset
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -268,6 +279,13 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         enqueueSceneInput { $0.ipd = ipd }
     }
     
+    func setLensOpticalAlignment(offset: CGFloat, newIPD: Float) {
+        DispatchQueue.main.async {
+            self.lensCenterOffset = offset
+        }
+        setIPD(newIPD)
+    }
+    
     func setPassthrough(enabled: Bool) {
         AppLogger.shared.log("[VREngine] Passthrough toggled: \(enabled)")
         if enabled {
@@ -369,6 +387,9 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         }
         monitor.onIPDChanged = { [weak self] ipd in
             self?.setIPD(ipd)
+        }
+        monitor.onLensOffsetChanged = { [weak self] offset, ipd in
+            self?.setLensOpticalAlignment(offset: offset, newIPD: ipd)
         }
         monitor.onRecalibrateRequested = { [weak self] in
             self?.recalibrateView()
