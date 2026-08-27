@@ -8,7 +8,7 @@ echo ========================================================
 echo.
 echo Please select how you want to run the application:
 echo.
-echo [1] Desktop Mode + Local Webcam (Default)
+echo [1] Start Virtual VR HDMI Monitor (Zero Bloat, 60 FPS Desktop Stream) [RECOMMENDED]
 echo [2] VR Mode (Split Screen) + Local Webcam
 echo [3] Desktop Mode + iPhone Camera (WebRTC)
 echo [4] VR Mode (Split Screen) + iPhone Camera (WebRTC)
@@ -18,7 +18,7 @@ echo [7] Exit
 echo.
 set /p choice="Enter your choice (1-7): "
 
-if "%choice%"=="1" goto run_desktop_local
+if "%choice%"=="1" goto run_virtual_hdmi
 if "%choice%"=="2" goto run_vr_local
 if "%choice%"=="3" goto run_desktop_webrtc
 if "%choice%"=="4" goto run_vr_webrtc
@@ -28,12 +28,9 @@ if "%choice%"=="7" goto eof
 
 goto menu
 
-:run_desktop_local
+:run_virtual_hdmi
 cls
-echo Starting Desktop Mode with Local Webcam...
-echo Press ESC to quit when running.
-echo.
-python main.py
+python virtual_display_server.py
 pause
 goto menu
 

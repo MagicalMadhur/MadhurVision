@@ -109,20 +109,32 @@ struct PCRemoteView: View {
             
             if network.isConnected {
                 if let image = network.currentImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .ignoresSafeArea()
-                        .rotationEffect(.degrees(90))
+                    // Dual-Eye Stereo Split Screen with Optical Lens Inset for VR Headset
+                    HStack(spacing: 0) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .offset(x: 34)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .offset(x: -34)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .background(Color.black)
+                    .ignoresSafeArea()
                     
                     VStack {
                         HStack {
                             Button("Disconnect") {
-                                network.disconnect() // We need to add this to NetworkManager
+                                network.disconnect()
                                 appState.currentMode = .home
                             }
-                            .padding()
-                            .background(Color.black.opacity(0.5))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.6))
                             .foregroundColor(.white)
                             .cornerRadius(10)
                             
@@ -132,8 +144,14 @@ struct PCRemoteView: View {
                     }
                     .padding()
                 } else {
-                    Text("Connected. Waiting for VR stream...")
-                        .foregroundColor(.white)
+                    VStack(spacing: 15) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
+                            .scaleEffect(1.5)
+                        Text("Connected to PC! Receiving 60 FPS Desktop stream...")
+                            .foregroundColor(.white)
+                            .font(.headline)
+                    }
                 }
             } else {
                 VStack(spacing: 20) {
@@ -181,12 +199,11 @@ struct PCRemoteView: View {
             }
         }
         .onAppear {
-            CameraManager.shared.start()
             MotionManager.shared.start()
         }
         .onDisappear {
-            CameraManager.shared.stop() // Need to add this
             MotionManager.shared.stop()
+            network.disconnect()
         }
     }
 }
