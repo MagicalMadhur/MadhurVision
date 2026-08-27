@@ -6,7 +6,11 @@ class NetworkManager: ObservableObject {
     static let shared = NetworkManager()
     
     @Published var isConnected = false
-    @Published var serverIP = "192.168.1.100" // Default or tethering IP like 172.20.10.2
+    @Published var serverIP: String = UserDefaults.standard.string(forKey: "pc_remote_ip") ?? "192.168.31.115" {
+        didSet {
+            UserDefaults.standard.set(serverIP, forKey: "pc_remote_ip")
+        }
+    }
     @Published var currentImage: UIImage? = nil
     @Published var errorMessage: String? = nil
     
