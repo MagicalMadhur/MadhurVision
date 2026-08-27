@@ -102,6 +102,8 @@ struct HomeView: View {
 struct PCRemoteView: View {
     @ObservedObject var appState: AppState
     @StateObject private var network = NetworkManager.shared
+    @State private var zoomScale: CGFloat = 1.35
+    @State private var lensOffset: CGFloat = 34.0
     
     var body: some View {
         ZStack {
@@ -109,22 +111,41 @@ struct PCRemoteView: View {
             
             if network.isConnected {
                 if let image = network.currentImage {
-                    // Dual-Eye Stereo Split Screen with Optical Lens Inset for VR Headset
+                    // Dual-Eye Stereo Split Screen with Optical Lens Inset & High-Def Magnification
                     HStack(spacing: 0) {
                         Image(uiImage: image)
+                            .interpolation(.high)
+                            .antialiased(true)
                             .resizable()
                             .scaledToFit()
-                            .offset(x: 34)
+                            .scaleEffect(zoomScale)
+                            .offset(x: lensOffset)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
                         
                         Image(uiImage: image)
+                            .interpolation(.high)
+                            .antialiased(true)
                             .resizable()
                             .scaledToFit()
-                            .offset(x: -34)
+                            .scaleEffect(zoomScale)
+                            .offset(x: -lensOffset)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
                     }
                     .background(Color.black)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if zoomScale < 1.2 {
+                                zoomScale = 1.35 // Large readable code/text
+                            } else if zoomScale < 1.5 {
+                                zoomScale = 1.65 // IMAX Huge
+                            } else {
+                                zoomScale = 1.0 // Normal Full View
+                            }
+                        }
+                    }
                     
                     VStack {
                         HStack {
@@ -139,6 +160,15 @@ struct PCRemoteView: View {
                             .cornerRadius(10)
                             
                             Spacer()
+                            
+                            // Zoom Badge Indicator
+                            Text("🔍 Zoom: \(String(format: "%.2fx", zoomScale)) (Tap screen to zoom)")
+                                .font(.system(size: 13, weight: .bold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.6))
+                                .foregroundColor(.cyan)
+                                .cornerRadius(8)
                         }
                         Spacer()
                     }

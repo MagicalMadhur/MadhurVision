@@ -63,22 +63,19 @@ def screen_capture_loop():
         while is_running:
             start_time = time.perf_counter()
             
-            # 1. Grab raw desktop frame
+            # 1. Grab raw desktop frame (Full Native 1080p Resolution)
             img = np.array(sct.grab(monitor)) # BGRA
             
-            # 2. Resize to optimal 1080p / 720p VR streaming resolution (1440x810 or 1280x720)
-            target_w = 1440
-            target_h = int(monitor['height'] * (1440.0 / monitor['width']))
-            if target_h % 2 != 0:
-                target_h += 1
-                
-            frame = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            # 2. Convert BGRA to BGR
+            bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
             
-            # 3. Convert BGRA to BGR
-            bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            # 3. HIGH-CONTRAST TEXT SHARPENING (Punches through cheap plastic VR lenses)
+            # Unsharp Mask algorithm to make text edges razor-sharp
+            gaussian = cv2.GaussianBlur(bgr, (0, 0), 2.0)
+            sharpened = cv2.addWeighted(bgr, 1.7, gaussian, -0.7, 0)
             
-            # 4. Fast JPEG compression (Quality: 75 for crystal clear text & low bandwidth)
-            _, encoded = cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            # 4. Ultra-High Quality JPEG compression (Quality: 92 for crisp subpixel text)
+            _, encoded = cv2.imencode('.jpg', sharpened, [cv2.IMWRITE_JPEG_QUALITY, 92])
             jpeg_bytes = encoded.tobytes()
             
             with frame_lock:
