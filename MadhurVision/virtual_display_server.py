@@ -47,6 +47,46 @@ def get_local_ips():
         pass
     return ips
 
+import ctypes
+from ctypes import wintypes
+
+class CURSOR_POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+def get_mouse_pos():
+    pt = CURSOR_POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
+
+def draw_hardware_mouse_cursor(frame, monitor_left=0, monitor_top=0):
+    """Draws a crisp high-visibility cursor onto the captured frame."""
+    try:
+        mx, my = get_mouse_pos()
+        rel_x = mx - monitor_left
+        rel_y = my - monitor_top
+        
+        h, w, _ = frame.shape
+        if 0 <= rel_x < w and 0 <= rel_y < h:
+            # Arrow polygon points
+            pts = np.array([
+                [rel_x, rel_y],
+                [rel_x, rel_y + 20],
+                [rel_x + 5, rel_y + 15],
+                [rel_x + 10, rel_y + 24],
+                [rel_x + 14, rel_y + 22],
+                [rel_x + 9, rel_y + 14],
+                [rel_x + 16, rel_y + 14]
+            ], np.int32)
+            
+            # Draw black shadow/outline
+            cv2.polylines(frame, [pts], isClosed=True, color=(0, 0, 0), thickness=3)
+            # Draw vibrant white cursor body
+            cv2.fillPoly(frame, [pts], color=(255, 255, 255))
+            # Center bright cyan accent dot
+            cv2.circle(frame, (rel_x + 3, rel_y + 3), 1, (255, 200, 0), -1)
+    except Exception:
+        pass
+
 # MARK: - Desktop Capture Thread (60 FPS)
 def screen_capture_loop():
     global latest_jpeg_frame, is_running
@@ -55,6 +95,8 @@ def screen_capture_loop():
     with mss.mss() as sct:
         # Monitor 1 is primary display
         monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+        mon_left = monitor.get('left', 0)
+        mon_top = monitor.get('top', 0)
         logger.info(f"Capturing Display: {monitor['width']}x{monitor['height']}")
         
         target_fps = 60
@@ -69,12 +111,15 @@ def screen_capture_loop():
             # 2. Convert BGRA to BGR
             bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
             
-            # 3. HIGH-CONTRAST TEXT SHARPENING (Punches through cheap plastic VR lenses)
+            # 3. Draw real-time Windows mouse cursor
+            draw_hardware_mouse_cursor(bgr, mon_left, mon_top)
+            
+            # 4. HIGH-CONTRAST TEXT SHARPENING (Punches through cheap plastic VR lenses)
             # Unsharp Mask algorithm to make text edges razor-sharp
             gaussian = cv2.GaussianBlur(bgr, (0, 0), 2.0)
             sharpened = cv2.addWeighted(bgr, 1.7, gaussian, -0.7, 0)
             
-            # 4. Ultra-High Quality JPEG compression (Quality: 92 for crisp subpixel text)
+            # 5. Ultra-High Quality JPEG compression (Quality: 92 for crisp subpixel text)
             _, encoded = cv2.imencode('.jpg', sharpened, [cv2.IMWRITE_JPEG_QUALITY, 92])
             jpeg_bytes = encoded.tobytes()
             

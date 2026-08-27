@@ -28,6 +28,7 @@ struct StandaloneVRView: View {
             .allowsHitTesting(false)
         }
         .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
             vrEngine.onExit = {
                 appState.currentMode = .home
             }
@@ -221,8 +222,8 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     private var pendingInput = PendingSceneInput()
     private let sceneUpdateLock = NSLock()
     
-    // Monitor distance in front of user
-    private let monitorDistance: Float = -2.0
+    // Monitor distance in front of user (comfortable reading depth)
+    private let monitorDistance: Float = -2.3
     
     // Reference attitude for bulletproof zero-calibration
     private var referenceAttitude: CMAttitude?

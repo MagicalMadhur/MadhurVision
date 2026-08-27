@@ -7,6 +7,9 @@ struct MadhurVisionApp: App {
     init() {
         AppLogger.shared.setupCrashHandlers()
         
+        // Keep phone screen permanently awake in VR (Disable Auto-Lock / Sleep Timer)
+        UIApplication.shared.isIdleTimerDisabled = true
+        
         // Global Audio Session Configuration for HTML5 & YouTube playback
         do {
             let audioSession = AVAudioSession.sharedInstance()
@@ -102,7 +105,7 @@ struct HomeView: View {
 struct PCRemoteView: View {
     @ObservedObject var appState: AppState
     @StateObject private var network = NetworkManager.shared
-    @State private var zoomScale: CGFloat = 1.35
+    @State private var zoomScale: CGFloat = 0.92
     @State private var lensOffset: CGFloat = 34.0
     
     var body: some View {
@@ -137,12 +140,12 @@ struct PCRemoteView: View {
                     .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            if zoomScale < 1.2 {
-                                zoomScale = 1.35 // Large readable code/text
-                            } else if zoomScale < 1.5 {
-                                zoomScale = 1.65 // IMAX Huge
+                            if zoomScale < 1.05 {
+                                zoomScale = 1.20 // Standard Expanded
+                            } else if zoomScale < 1.35 {
+                                zoomScale = 1.50 // Coding & IDE Large Text
                             } else {
-                                zoomScale = 1.0 // Normal Full View
+                                zoomScale = 0.92 // Sweet Spot (Full Screen Sharp)
                             }
                         }
                     }
