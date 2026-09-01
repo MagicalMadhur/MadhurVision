@@ -263,17 +263,29 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
                 let config = WKWebViewConfiguration()
                 config.allowsInlineMediaPlayback = true
                 config.mediaTypesRequiringUserActionForPlayback = []
+                config.allowsAirPlayForMediaPlayback = true
+                config.allowsPictureInPictureMediaPlayback = true
+                
+                let pref = WKWebpagePreferences()
+                pref.allowsContentJavaScript = true
+                config.defaultWebpagePreferences = pref
                 
                 let webRect = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth - 100, height: VRMonitorNode.canvasHeight - 70)
                 let wv = WKWebView(frame: webRect, configuration: config)
-                wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
                 wv.navigationDelegate = self
                 wv.isOpaque = true
                 wv.backgroundColor = .white
                 self.webView = wv
             }
             
-            if let url = URL(string: urlString) {
+            // Auto-redirect desktop youtube to fast mobile HTML5 youtube for instant video playback
+            var targetURL = urlString
+            if targetURL.contains("youtube.com") && !targetURL.contains("m.youtube.com") {
+                targetURL = targetURL.replacingOccurrences(of: "www.youtube.com", with: "m.youtube.com")
+                targetURL = targetURL.replacingOccurrences(of: "https://youtube.com", with: "https://m.youtube.com")
+            }
+            
+            if let url = URL(string: targetURL) {
                 let req = URLRequest(url: url)
                 self.webView?.load(req)
             }
@@ -284,7 +296,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
     
     private func startWebSnapshotTimer() {
         webSnapshotTimer?.invalidate()
-        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
             self?.captureWebSnapshot()
         }
     }
@@ -304,6 +316,18 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
         if let currentURL = webView.url?.absoluteString {
             self.currentWebURL = currentURL
         }
+        
+        // Ensure inline HTML5 playback for YouTube videos without blocking
+        let inlineScript = """
+        (function() {
+            var videos = document.querySelectorAll('video');
+            videos.forEach(function(v) {
+                v.setAttribute('playsinline', 'true');
+                v.setAttribute('webkit-playsinline', 'true');
+            });
+        })();
+        """
+        webView.evaluateJavaScript(inlineScript, completionHandler: nil)
         captureWebSnapshot()
     }
     
@@ -542,8 +566,8 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
             ("🔍", "Google", .webBrowser(url: "https://www.google.com", title: "Google Search"), { [weak self] in
                 self?.openWebURL("https://www.google.com", title: "Google Search")
             }),
-            ("📺", "YouTube", .webBrowser(url: "https://www.youtube.com", title: "YouTube"), { [weak self] in
-                self?.openWebURL("https://www.youtube.com", title: "YouTube")
+            ("📺", "YouTube", .webBrowser(url: "https://m.youtube.com", title: "YouTube"), { [weak self] in
+                self?.openWebURL("https://m.youtube.com", title: "YouTube")
             }),
             ("🎬", "Cinema", .youtubeFeed, { [weak self] in
                 self?.setViewState(.youtubeFeed)
@@ -845,7 +869,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
                 desc: "Stream trending videos, channels, creators, and music on YouTube",
                 gradient: [UIColor(red: 0.40, green: 0.08, blue: 0.08, alpha: 0.8), UIColor(red: 0.15, green: 0.02, blue: 0.02, alpha: 0.8)],
                 action: { [weak self] in
-                    self?.openWebURL("https://www.youtube.com", title: "YouTube")
+                    self?.openWebURL("https://m.youtube.com", title: "YouTube")
                 }
             ),
             AppCardData(
