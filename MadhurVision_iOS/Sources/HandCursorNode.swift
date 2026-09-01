@@ -80,34 +80,44 @@ class HandCursorNode: SCNNode {
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { context in
             let center = CGPoint(x: 64, y: 64)
+            let cgCtx = context.cgContext
             
             // Outer glow shadow
-            context.cgContext.saveGState()
-            context.cgContext.setShadow(offset: .zero, blur: 12, color: UIColor(red: 0, green: 0.83, blue: 1.0, alpha: 0.9).cgColor)
+            cgCtx.saveGState()
+            cgCtx.setShadow(offset: .zero, blur: 10, color: UIColor(red: 0, green: 0.85, blue: 1.0, alpha: 1.0).cgColor)
             
-            // Outer Ring
-            let ringPath = UIBezierPath(arcCenter: center, radius: 46, startAngle: 0, endAngle: .pi * 2, clockwise: true)
-            ringPath.lineWidth = 6
-            UIColor.white.setStroke()
+            // 1. Outer Dark Shadow Ring
+            let darkRing = UIBezierPath(arcCenter: center, radius: 44, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            darkRing.lineWidth = 5
+            UIColor.black.withAlphaComponent(0.8).setStroke()
+            darkRing.stroke()
+            
+            // 2. Outer Electric Cyan Ring
+            let ringPath = UIBezierPath(arcCenter: center, radius: 44, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            ringPath.lineWidth = 3.5
+            UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0).setStroke()
             ringPath.stroke()
             
-            // Dark Outline for outer ring (visible against white backgrounds)
-            let darkRing = UIBezierPath(arcCenter: center, radius: 49, startAngle: 0, endAngle: .pi * 2, clockwise: true)
-            darkRing.lineWidth = 2
-            UIColor.black.setStroke()
-            darkRing.stroke()
-
-            // Center Focal Dot
-            let dotPath = UIBezierPath(arcCenter: center, radius: 10, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            // 3. 4 Crosshair Aiming Ticks (Top, Bottom, Left, Right)
+            let tickPath = UIBezierPath()
+            tickPath.move(to: CGPoint(x: 64, y: 10)); tickPath.addLine(to: CGPoint(x: 64, y: 22)) // Top
+            tickPath.move(to: CGPoint(x: 64, y: 106)); tickPath.addLine(to: CGPoint(x: 64, y: 118)) // Bottom
+            tickPath.move(to: CGPoint(x: 10, y: 64)); tickPath.addLine(to: CGPoint(x: 22, y: 64)) // Left
+            tickPath.move(to: CGPoint(x: 106, y: 64)); tickPath.addLine(to: CGPoint(x: 118, y: 64)) // Right
+            tickPath.lineWidth = 3
+            UIColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0).setStroke()
+            tickPath.stroke()
+            
+            // 4. Center Focal Dot (High-Contrast White with Dark Border)
+            let dotBorder = UIBezierPath(arcCenter: center, radius: 11, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+            UIColor.black.setFill()
+            dotBorder.fill()
+            
+            let dotPath = UIBezierPath(arcCenter: center, radius: 9, startAngle: 0, endAngle: .pi * 2, clockwise: true)
             UIColor.white.setFill()
             dotPath.fill()
             
-            let dotBorder = UIBezierPath(arcCenter: center, radius: 11, startAngle: 0, endAngle: .pi * 2, clockwise: true)
-            dotBorder.lineWidth = 2
-            UIColor.black.setStroke()
-            dotBorder.stroke()
-            
-            context.cgContext.restoreGState()
+            cgCtx.restoreGState()
         }
     }
 
@@ -133,7 +143,7 @@ class HandCursorNode: SCNNode {
         // Apply adaptive 1€ Filter (Zero jitter when resting, 0ms lag when moving)
         let pos = oneEuroFilter.filter(point: fingerPos)
 
-        // Map 2D camera coordinates with 1:1 natural angular FOV
+        // Map 2D coordinates with natural angular FOV
         let ndcX = Float(pos.x * 2.0 - 1.0)
         let ndcY = -Float(pos.y * 2.0 - 1.0) // Invert Y
 
@@ -141,8 +151,8 @@ class HandCursorNode: SCNNode {
         let localHandPos = SCNVector3(ndcX * 0.15 + 0.05, ndcY * 0.15 - 0.18, -0.38)
         let worldHandPos = cameraNode.convertPosition(localHandPos, to: nil)
 
-        // 2. 1:1 Natural Ray Direction pointing directly into the VR monitor plane
-        let localTargetPos = SCNVector3(ndcX * 1.35, ndcY * 1.05, -2.0)
+        // 2. 1:1 Natural Ray Direction pointing directly through and past the VR monitor plane (Z = -5.0m)
+        let localTargetPos = SCNVector3(ndcX * 2.5, ndcY * 2.0, -5.0)
         let worldTargetPos = cameraNode.convertPosition(localTargetPos, to: nil)
 
         // Segment endpoints
@@ -165,9 +175,9 @@ class HandCursorNode: SCNNode {
             // Show and position reticle ring hugging surface
             reticleNode.isHidden = false
             reticleNode.worldPosition = SCNVector3(
-                hitPoint.x + normal.x * 0.006,
-                hitPoint.y + normal.y * 0.006,
-                hitPoint.z + normal.z * 0.006
+                hitPoint.x + normal.x * 0.008,
+                hitPoint.y + normal.y * 0.008,
+                hitPoint.z + normal.z * 0.008
             )
             targetEndPoint = hitPoint
 
@@ -182,10 +192,11 @@ class HandCursorNode: SCNNode {
                 onScroll?(hit, scrollDelta)
             }
         } else {
-            // When laser moves past monitor edges, project to monitor depth plane (-2.0m)
-            // so beam length never jumps or glitches abruptly!
-            reticleNode.isHidden = true
-            targetEndPoint = cameraNode.convertPosition(SCNVector3(ndcX * 1.5, ndcY * 1.5, -2.0), to: nil)
+            // Project pointer dot to monitor depth plane (-2.3m) so it is ALWAYS visible
+            reticleNode.isHidden = false
+            let fallbackPoint = cameraNode.convertPosition(SCNVector3(ndcX * 1.5, ndcY * 1.5, -2.3), to: nil)
+            reticleNode.worldPosition = fallbackPoint
+            targetEndPoint = fallbackPoint
         }
 
         positionLaserBeam(from: rayStart, to: targetEndPoint)

@@ -80,8 +80,8 @@ class MouseCursorNode: SCNNode {
         let ndcX = Float(virtualPosition.x * 2.0 - 1.0)
         let ndcY = -Float(virtualPosition.y * 2.0 - 1.0)
         
-        // Same raycast logic as hand cursor
-        let rayDirection = SCNVector3(ndcX * 1.5, ndcY * 1.5, -3.0)
+        // Deep raycast through VR monitor plane
+        let rayDirection = SCNVector3(ndcX * 2.5, ndcY * 2.0, -5.0)
         
         let worldOrigin = cameraNode.worldPosition
         let worldDirection = cameraNode.convertVector(rayDirection, to: nil)
