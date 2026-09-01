@@ -45,6 +45,9 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     private var isWebLoading: Bool = false
     private var webSnapshotTimer: Timer?
     private var isSnapshotting: Bool = false
+    /// Caches the last successfully captured web snapshot so we can re-render it
+    /// immediately whenever renderCurrentState() is called (e.g. after a dock tap).
+    private var cachedWebSnapshot: UIImage? = nil
     
     // MARK: - Cinema Player Engine (Direct Metal GPU Texture)
     private var cinemaPlayer: AVPlayer?
@@ -206,6 +209,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         webView?.stopLoading()
         webView?.removeFromSuperview()
         webView = nil
+        cachedWebSnapshot = nil
         exitCinemaMode()
         activeClickableZones.removeAll()
     }
@@ -348,11 +352,17 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 self.exitCinemaMode()
             }
             
+            // Reset snapshot cache when navigating to a new URL so we show
+            // the "loading" placeholder until a real frame arrives.
+            self.cachedWebSnapshot = nil
             self.currentWebURL = urlString
             self.currentWebTitle = title
             self.isWebLoading = true
             self.currentState = .webBrowser(url: urlString, title: title)
             self.renderCurrentState()
+            
+            // Stop any previous snapshot timer while the new page loads
+            self.stopWebSnapshotTimer()
             
             // Initialize WKWebView if not already created
             if self.webView == nil {
@@ -369,7 +379,13 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 // Process pool for cookie/session persistence
                 config.processPool = WKProcessPool()
                 
-                let webRect = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth - 100, height: VRMonitorNode.canvasHeight - 70)
+                // Use a realistic iPhone screen-sized frame. Placing at a large
+                // negative x keeps it completely off-screen for the user while
+                // letting WebKit fully composite the layer (alpha MUST be 1.0
+                // or WebKit will skip drawing and takeSnapshot returns blank).
+                let screenW = UIScreen.main.bounds.width
+                let screenH = UIScreen.main.bounds.height
+                let webRect = CGRect(x: -(screenW + 100), y: 0, width: screenW, height: screenH)
                 let wv = WKWebView(frame: webRect, configuration: config)
                 wv.navigationDelegate = self
                 wv.uiDelegate = self
@@ -377,21 +393,21 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 wv.backgroundColor = .white
                 wv.scrollView.bounces = false
                 wv.scrollView.contentInsetAdjustmentBehavior = .never
+                // Full alpha is mandatory — WebKit skips compositing for alpha < ~0.05,
+                // causing takeSnapshot() to return a blank/white image.
+                wv.alpha = 1.0
+                wv.isUserInteractionEnabled = false
                 wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
                 
-                // *** CRITICAL FIX: Attach WKWebView to the live UIWindow hierarchy ***
-                // iOS WebKit REQUIRES the view to be in a window for:
-                //   - Media/video playback (HTML5 <video>)
-                //   - Reliable JavaScript execution
-                //   - Proper rendering compositing
-                // We add it behind everything at near-zero opacity so it's invisible
-                // to the user but fully functional for WebKit's compositor.
+                // Attach to the live window hierarchy so WebKit's GPU compositor
+                // runs (required for HTML5 video, JavaScript timers, etc.).
                 if let windowScene = UIApplication.shared.connectedScenes
                     .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
-                   let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }) {
-                    wv.alpha = 0.01
-                    wv.isUserInteractionEnabled = false
-                    keyWindow.insertSubview(wv, at: 0)
+                   let window = windowScene.windows.first {
+                    window.addSubview(wv)
+                } else if let window = UIApplication.shared.windows.first {
+                    // Fallback for older iOS / edge cases
+                    window.addSubview(wv)
                 }
                 
                 self.webView = wv
@@ -409,7 +425,10 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 self.webView?.load(req)
             }
             
-            self.startWebSnapshotTimer()
+            // NOTE: Do NOT start the snapshot timer here. We start it inside
+            // webView(_:didFinish:) once the page has actually rendered.
+            // Starting it too early causes blank white frames to overwrite the
+            // "Loading…" placeholder before any content is ready.
         }
     }
     
@@ -459,7 +478,13 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         })();
         """
         webView.evaluateJavaScript(inlineScript, completionHandler: nil)
-        captureWebSnapshot()
+        
+        // Start the snapshot timer only AFTER the page has finished loading and
+        // the WebKit compositor has rendered the first meaningful frame.
+        self.startWebSnapshotTimer()
+        
+        // Capture immediately without waiting for the first timer tick
+        self.captureWebSnapshot()
     }
     
     // Handle navigation failures gracefully
@@ -499,9 +524,15 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             guard let self = self else { return }
             self.isSnapshotting = false
             
+            // Cache the snapshot so renderCurrentState() can use it.
+            // This ensures we always show the last valid frame.
             if let image = image {
-                self.renderWebBrowserComposite(webImage: image)
+                self.cachedWebSnapshot = image
             }
+            
+            // Trigger a full render pass so the 3D monitor texture updates
+            // immediately whenever a new frame arrives.
+            self.renderCurrentState()
         }
     }
     
@@ -513,6 +544,13 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 self.exitCinemaMode()
             }
             self.stopWebSnapshotTimer()
+            
+            // Clear the cached snapshot when leaving the web browser so the next
+            // visit starts fresh with the loading placeholder.
+            if case .webBrowser = self.currentState, !case .webBrowser = state {
+                self.cachedWebSnapshot = nil
+            }
+            
             self.currentState = state
             self.renderCurrentState()
         }
@@ -832,8 +870,16 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 let contentZones = drawHomeView(in: contentRect, ctx: cgCtx)
                 zones.append(contentsOf: contentZones)
             case .webBrowser(let url, let title):
-                let webLoadingZones = drawWebBrowserLoadingView(in: contentRect, url: url, title: title, ctx: cgCtx)
-                zones.append(contentsOf: webLoadingZones)
+                // If we already have a cached web snapshot, draw it as the
+                // main content (this is what makes the page visible). Otherwise
+                // show the loading placeholder until the first snapshot arrives.
+                if let snapshot = self.cachedWebSnapshot {
+                    let webRect = CGRect(x: 100, y: 60, width: size.width - 100, height: size.height - 60)
+                    snapshot.draw(in: webRect)
+                } else {
+                    let webLoadingZones = drawWebBrowserLoadingView(in: contentRect, url: url, title: title, ctx: cgCtx)
+                    zones.append(contentsOf: webLoadingZones)
+                }
             case .youtubeFeed:
                 let youtubeZones = drawYouTubeFeedView(in: contentRect, ctx: cgCtx)
                 zones.append(contentsOf: youtubeZones)
