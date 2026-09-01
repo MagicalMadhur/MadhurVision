@@ -16,7 +16,7 @@ public struct SpatialVideoItem: Identifiable {
 }
 
 /// Pure Native Spatial OS for VR Monitor (Native Apps + Direct Cinema + Web Engine)
-public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
+public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     
     // MARK: - Canvas Dimensions
     public static let canvasWidth: CGFloat = 1440
@@ -162,6 +162,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
     public func cleanup() {
         stopWebSnapshotTimer()
         webView?.stopLoading()
+        webView?.removeFromSuperview()
         webView = nil
         exitCinemaMode()
         activeClickableZones.removeAll()
@@ -279,7 +280,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
         }
     }
     
-    // MARK: - In-VR Web Browser Engine (Google, Wikipedia, Reddit, SpeedTest)
+    // MARK: - In-VR Web Browser Engine
     public func openWebURL(_ urlString: String, title: String = "Web Browser") {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -308,15 +309,37 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
                 pref.allowsContentJavaScript = true
                 config.defaultWebpagePreferences = pref
                 
+                // Process pool for cookie/session persistence
+                config.processPool = WKProcessPool()
+                
                 let webRect = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth - 100, height: VRMonitorNode.canvasHeight - 70)
                 let wv = WKWebView(frame: webRect, configuration: config)
                 wv.navigationDelegate = self
+                wv.uiDelegate = self
                 wv.isOpaque = true
                 wv.backgroundColor = .white
+                wv.scrollView.bounces = false
+                wv.scrollView.contentInsetAdjustmentBehavior = .never
+                
+                // *** CRITICAL FIX: Attach WKWebView to the live UIWindow hierarchy ***
+                // iOS WebKit REQUIRES the view to be in a window for:
+                //   - Media/video playback (HTML5 <video>)
+                //   - Reliable JavaScript execution (YouTube's player framework)
+                //   - Proper rendering compositing
+                // We add it behind everything at near-zero opacity so it's invisible
+                // to the user but fully functional for WebKit's compositor.
+                if let windowScene = UIApplication.shared.connectedScenes
+                    .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+                   let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }) {
+                    wv.alpha = 0.01
+                    wv.isUserInteractionEnabled = false
+                    keyWindow.insertSubview(wv, at: 0)
+                }
+                
                 self.webView = wv
             }
             
-            // Auto-redirect desktop youtube to fast mobile HTML5 youtube for instant video playback
+            // Auto-redirect desktop youtube to fast mobile HTML5 youtube
             var targetURL = urlString
             if targetURL.contains("youtube.com") && !targetURL.contains("m.youtube.com") {
                 targetURL = targetURL.replacingOccurrences(of: "www.youtube.com", with: "m.youtube.com")
@@ -334,7 +357,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
     
     private func startWebSnapshotTimer() {
         webSnapshotTimer?.invalidate()
-        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.captureWebSnapshot()
         }
     }
@@ -355,18 +378,55 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
             self.currentWebURL = currentURL
         }
         
-        // Ensure inline HTML5 playback for YouTube videos without blocking
+        // Force inline HTML5 video playback and auto-play for YouTube
         let inlineScript = """
         (function() {
+            // Mark all videos as inline playback
             var videos = document.querySelectorAll('video');
             videos.forEach(function(v) {
                 v.setAttribute('playsinline', 'true');
                 v.setAttribute('webkit-playsinline', 'true');
+                v.removeAttribute('controls');
+                v.controls = true;
             });
+            
+            // Disable YouTube's fullscreen-only player override
+            var meta = document.querySelector('meta[name="viewport"]');
+            if (!meta) {
+                meta = document.createElement('meta');
+                meta.name = 'viewport';
+                document.head.appendChild(meta);
+            }
+            meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
         })();
         """
         webView.evaluateJavaScript(inlineScript, completionHandler: nil)
         captureWebSnapshot()
+    }
+    
+    // Handle navigation failures gracefully
+    public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        isWebLoading = false
+        captureWebSnapshot()
+    }
+    
+    public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        isWebLoading = false
+        captureWebSnapshot()
+    }
+    
+    // Allow all navigation (YouTube redirects between m.youtube.com pages)
+    public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(.allow)
+    }
+    
+    // Handle target="_blank" links (YouTube opens video pages with these)
+    // Load them in the same webview instead of trying to open a new window
+    public func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url {
+            webView.load(URLRequest(url: url))
+        }
+        return nil
     }
     
     public func captureWebSnapshot() {
@@ -375,7 +435,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
         
         let config = WKSnapshotConfiguration()
         config.rect = webView.bounds
-        config.afterScreenUpdates = false
+        config.afterScreenUpdates = true
         
         webView.takeSnapshot(with: config) { [weak self] image, error in
             guard let self = self else { return }
