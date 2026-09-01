@@ -379,35 +379,36 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 // Process pool for cookie/session persistence
                 config.processPool = WKProcessPool()
                 
-                // Use a realistic iPhone screen-sized frame. Placing at a large
-                // negative x keeps it completely off-screen for the user while
-                // letting WebKit fully composite the layer (alpha MUST be 1.0
-                // or WebKit will skip drawing and takeSnapshot returns blank).
+                // CRITICAL: The web view MUST be positioned within the screen bounds
+                // (not offscreen) or iOS GPU won't composite the AVPlayer video layer.
+                // We place it at (0, 0) but send it to the BACK of the z-order
+                // (below the VR SceneKit views) so it's invisible to the user.
                 let screenW = UIScreen.main.bounds.width
                 let screenH = UIScreen.main.bounds.height
-                let webRect = CGRect(x: -(screenW + 100), y: 0, width: screenW, height: screenH)
+                let webRect = CGRect(x: 0, y: 0, width: screenW, height: screenH)
                 let wv = WKWebView(frame: webRect, configuration: config)
                 wv.navigationDelegate = self
                 wv.uiDelegate = self
                 wv.isOpaque = true
-                wv.backgroundColor = .white
+                wv.backgroundColor = .black
                 wv.scrollView.bounces = false
                 wv.scrollView.contentInsetAdjustmentBehavior = .never
-                // Full alpha is mandatory — WebKit skips compositing for alpha < ~0.05,
-                // causing takeSnapshot() to return a blank/white image.
+                // Full alpha is mandatory — WebKit skips compositing for alpha < ~0.05
                 wv.alpha = 1.0
                 wv.isUserInteractionEnabled = false
                 wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
                 
-                // Attach to the live window hierarchy so WebKit's GPU compositor
-                // runs (required for HTML5 video, JavaScript timers, etc.).
+                // Attach to the live window hierarchy at z-index 0 (BACK)
+                // so the VR SceneKit views render ON TOP and hide the web view
+                // from the user.  The web view is still on-screen, which means
+                // the GPU composites its AVPlayer video layer — essential for
+                // drawHierarchy / layer.render to capture video frames.
                 if let windowScene = UIApplication.shared.connectedScenes
                     .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
                    let window = windowScene.windows.first {
-                    window.addSubview(wv)
+                    window.insertSubview(wv, at: 0)
                 } else if let window = UIApplication.shared.windows.first {
-                    // Fallback for older iOS / edge cases
-                    window.addSubview(wv)
+                    window.insertSubview(wv, at: 0)
                 }
                 
                 self.webView = wv
@@ -512,28 +513,40 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         return nil
     }
     
+    /// Captures the current web view content into a UIImage.
+    ///
+    /// Strategy:
+    ///   1. `drawHierarchy(in:afterScreenUpdates:)` — captures the full
+    ///      UIKit view tree including any CALayer sublayers that AVPlayer
+    ///      uses for HTML5 video.  This is the **only** reliable way to
+    ///      get video frames out of a WKWebView on iOS.
+    ///   2. We call this on the **main thread** because UIKit rendering
+    ///      is not thread-safe.
+    ///   3. The result is cached in `cachedWebSnapshot` so the next
+    ///      `renderCurrentState()` call can draw it onto the 3D plane.
     public func captureWebSnapshot() {
         guard case .webBrowser = currentState, let webView = self.webView, !isSnapshotting else { return }
         isSnapshotting = true
         
-        let config = WKSnapshotConfiguration()
-        config.rect = webView.bounds
-        config.afterScreenUpdates = true
-        
-        webView.takeSnapshot(with: config) { [weak self] image, error in
-            guard let self = self else { return }
-            self.isSnapshotting = false
-            
-            // Cache the snapshot so renderCurrentState() can use it.
-            // This ensures we always show the last valid frame.
-            if let image = image {
-                self.cachedWebSnapshot = image
-            }
-            
-            // Trigger a full render pass so the 3D monitor texture updates
-            // immediately whenever a new frame arrives.
-            self.renderCurrentState()
+        let bounds = webView.bounds
+        guard bounds.width > 0, bounds.height > 0 else {
+            isSnapshotting = false
+            return
         }
+        
+        // Must run on the main thread for UIKit rendering.
+        // afterScreenUpdates: false avoids forcing a layout pass —
+        // we just grab whatever is currently composited.
+        UIGraphicsBeginImageContextWithOptions(bounds.size, true, 1.0)
+        webView.drawHierarchy(in: bounds, afterScreenUpdates: false)
+        let snapshot = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        isSnapshotting = false
+        if let image = snapshot {
+            self.cachedWebSnapshot = image
+        }
+        self.renderCurrentState()
     }
     
     // MARK: - State Navigation
