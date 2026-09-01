@@ -542,10 +542,10 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
             ("🔍", "Google", .webBrowser(url: "https://www.google.com", title: "Google Search"), { [weak self] in
                 self?.openWebURL("https://www.google.com", title: "Google Search")
             }),
-            ("🎬", "Cinema", .youtubeFeed, { [weak self] in
-                self?.setViewState(.youtubeFeed)
+            ("📺", "YouTube", .webBrowser(url: "https://www.youtube.com", title: "YouTube"), { [weak self] in
+                self?.openWebURL("https://www.youtube.com", title: "YouTube")
             }),
-            ("📺", "YouTube", .youtubeFeed, { [weak self] in
+            ("🎬", "Cinema", .youtubeFeed, { [weak self] in
                 self?.setViewState(.youtubeFeed)
             }),
             ("⚙️", "Settings", .settings, { [weak self] in self?.setViewState(.settings) }),
@@ -841,11 +841,11 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
             ),
             AppCardData(
                 icon: "▶️",
-                title: "YouTube Live",
-                desc: "Stream trending videos, 4K nature, channels, and music",
+                title: "YouTube",
+                desc: "Stream trending videos, channels, creators, and music on YouTube",
                 gradient: [UIColor(red: 0.40, green: 0.08, blue: 0.08, alpha: 0.8), UIColor(red: 0.15, green: 0.02, blue: 0.02, alpha: 0.8)],
                 action: { [weak self] in
-                    self?.setViewState(.youtubeFeed)
+                    self?.openWebURL("https://www.youtube.com", title: "YouTube")
                 }
             ),
             AppCardData(
