@@ -56,74 +56,159 @@ struct StandaloneVRView: View {
     }
 }
 
-// MARK: - Dual-Eye Web Browser Overlay (Real WKWebView with native video playback)
+// MARK: - Dual-Eye Web Browser Overlay (Real WKWebView with Stereo Sync & Controls)
+
+class SharedWebSession: ObservableObject {
+    @Published var currentURL: String
+    @Published var webTitle: String = "Web Browser"
+    @Published var canGoBack: Bool = false
+    
+    // Commands to trigger across both views
+    @Published var triggerGoBack: Int = 0
+    @Published var triggerReload: Int = 0
+    
+    init(initialURL: String) {
+        self.currentURL = initialURL
+    }
+    
+    func navigate(to newURL: String) {
+        if self.currentURL != newURL {
+            self.currentURL = newURL
+        }
+    }
+}
 
 struct DualEyeWebBrowserOverlay: View {
     let url: String
     let lensCenterOffset: CGFloat
     let onClose: () -> Void
     
+    @StateObject private var session: SharedWebSession
+    
+    init(url: String, lensCenterOffset: CGFloat, onClose: @escaping () -> Void) {
+        self.url = url
+        self.lensCenterOffset = lensCenterOffset
+        self.onClose = onClose
+        _session = StateObject(wrappedValue: SharedWebSession(initialURL: url))
+    }
+    
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
+            // Dual Eye WebViews with stereo offset
             HStack(spacing: 0) {
-                // Left Eye - Real interactive WKWebView
-                WebViewWrapper(url: url)
-                    .padding(.leading, lensCenterOffset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Left Eye (Audio Enabled)
+                EyeBrowserView(
+                    session: session,
+                    isMuted: false,
+                    offset: lensCenterOffset,
+                    onClose: onClose
+                )
                 
-                // Right Eye - Second WKWebView (same URL)
-                WebViewWrapper(url: url)
-                    .padding(.trailing, lensCenterOffset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            
-            // Close button overlay (centered bottom)
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Button(action: onClose) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 18))
-                            Text("Close Browser")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color.black.opacity(0.75))
-                        .cornerRadius(20)
-                    }
-                    Spacer()
-                }
-                .padding(.bottom, 12)
+                // Right Eye (Muted to prevent audio doubling / echo)
+                EyeBrowserView(
+                    session: session,
+                    isMuted: true,
+                    offset: -lensCenterOffset,
+                    onClose: onClose
+                )
             }
         }
     }
 }
 
+struct EyeBrowserView: View {
+    @ObservedObject var session: SharedWebSession
+    let isMuted: Bool
+    let offset: CGFloat
+    let onClose: () -> Void
+    
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            // Live Interactive WebKit View
+            WebViewWrapper(session: session, isMuted: isMuted)
+                .offset(x: offset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            
+            // Bottom In-VR Control Dock (Mirrored per Eye for comfort)
+            HStack(spacing: 12) {
+                // Back Button
+                Button(action: {
+                    session.triggerGoBack += 1
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
+                    }
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(session.canGoBack ? .white : .white.opacity(0.4))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(14)
+                }
+                .disabled(!session.canGoBack)
+                
+                // Reload Button
+                Button(action: {
+                    session.triggerReload += 1
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(8)
+                        .background(Color.black.opacity(0.8))
+                        .cornerRadius(14)
+                }
+                
+                // Close / Home Button
+                Button(action: onClose) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.circle.fill")
+                        Text("Exit to VR")
+                    }
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(LinearGradient(gradient: Gradient(colors: [Color.red.opacity(0.9), Color.orange.opacity(0.9)]), startPoint: .leading, endPoint: .trailing))
+                    .cornerRadius(14)
+                }
+            }
+            .offset(x: offset)
+            .padding(.bottom, 12)
+        }
+    }
+}
+
 struct WebViewWrapper: UIViewRepresentable {
-    let url: String
+    @ObservedObject var session: SharedWebSession
+    let isMuted: Bool
     
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.allowsAirPlayForMediaPlayback = true
+        config.allowsPictureInPictureMediaPlayback = true
+        
+        let pref = WKWebpagePreferences()
+        pref.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = pref
         
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.isOpaque = true
-        wv.backgroundColor = .white
-        wv.scrollView.bounces = false
+        wv.backgroundColor = .black
+        wv.scrollView.bounces = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
         wv.navigationDelegate = context.coordinator
         wv.uiDelegate = context.coordinator
         
-        // Load the URL
-        var targetURL = url
+        context.coordinator.webView = wv
+        context.coordinator.isMuted = isMuted
+        
+        var targetURL = session.currentURL
         if targetURL.contains("youtube.com") && !targetURL.contains("m.youtube.com") {
             targetURL = targetURL.replacingOccurrences(of: "www.youtube.com", with: "m.youtube.com")
         }
@@ -133,24 +218,67 @@ struct WebViewWrapper: UIViewRepresentable {
         return wv
     }
     
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        // Handle Back command
+        if context.coordinator.lastGoBackTrigger != session.triggerGoBack {
+            context.coordinator.lastGoBackTrigger = session.triggerGoBack
+            if uiView.canGoBack {
+                uiView.goBack()
+            }
+        }
+        
+        // Handle Reload command
+        if context.coordinator.lastReloadTrigger != session.triggerReload {
+            context.coordinator.lastReloadTrigger = session.triggerReload
+            uiView.reload()
+        }
+    }
     
     func makeCoordinator() -> WebViewCoordinator {
-        WebViewCoordinator()
+        WebViewCoordinator(session: session)
     }
     
     class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        weak var webView: WKWebView?
+        let session: SharedWebSession
+        var isMuted: Bool = false
+        var lastGoBackTrigger: Int = 0
+        var lastReloadTrigger: Int = 0
+        
+        init(session: SharedWebSession) {
+            self.session = session
+        }
+        
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            DispatchQueue.main.async {
+                self.session.canGoBack = webView.canGoBack
+                if let title = webView.title, !title.isEmpty {
+                    self.session.webTitle = title
+                }
+            }
+            
+            // Inline video injection + optional mute for secondary eye
+            let muteScript = isMuted ? "v.muted = true;" : ""
             let js = """
             (function() {
                 var videos = document.querySelectorAll('video');
                 videos.forEach(function(v) {
                     v.setAttribute('playsinline', 'true');
                     v.setAttribute('webkit-playsinline', 'true');
+                    \(muteScript)
                 });
             })();
             """
             webView.evaluateJavaScript(js, completionHandler: nil)
+        }
+        
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            if let current = webView.url?.absoluteString, !isMuted {
+                DispatchQueue.main.async {
+                    self.session.currentURL = current
+                    self.session.canGoBack = webView.canGoBack
+                }
+            }
         }
         
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
