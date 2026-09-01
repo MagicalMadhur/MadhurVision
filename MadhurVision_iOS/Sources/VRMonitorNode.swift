@@ -189,7 +189,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
         
         // 1. Check if clicked on Web Browser content
         if case .webBrowser = currentState {
-            // Check top navigation bar zones (y <= 70) or sidebar dock (x <= 100)
+            // Check top navigation bar zones (y <= 60) or sidebar dock (x <= 100)
             for zone in activeClickableZones {
                 if zone.rect.contains(hitPoint) {
                     AppLogger.shared.log("[VRMonitorNode] Web Browser UI Click hit \(zone.rect)")
@@ -198,16 +198,54 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
                 }
             }
             
-            // Dispatch click into DOM in WKWebView
-            if let webView = self.webView, pixelX > 100 && pixelY > 70 {
+            // Dispatch synthetic touch, pointer, and click events into DOM in WKWebView
+            if let webView = self.webView, pixelX > 100 && pixelY > 60 {
                 let webX = pixelX - 100
-                let webY = pixelY - 70
+                let webY = pixelY - 60
                 let js = """
                 (function() {
-                    var el = document.elementFromPoint(\(webX), \(webY));
-                    if(el) {
-                        el.click();
-                        el.focus();
+                    var x = \(webX);
+                    var y = \(webY);
+                    var el = document.elementFromPoint(x, y);
+                    if (!el) return;
+                    
+                    // 1. Find closest clickable link or button
+                    var anchor = el.closest('a');
+                    var button = el.closest('button') || el.closest('[role="button"]') || el.closest('[onclick]');
+                    var target = anchor || button || el;
+                    
+                    // 2. Dispatch Touch Events
+                    try {
+                        var touch = new Touch({ identifier: Date.now(), target: target, clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y });
+                        var tStart = new TouchEvent('touchstart', { cancelable: true, bubbles: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] });
+                        var tEnd = new TouchEvent('touchend', { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [touch] });
+                        target.dispatchEvent(tStart);
+                        target.dispatchEvent(tEnd);
+                    } catch(e) {}
+                    
+                    // 3. Dispatch Pointer & Mouse Events
+                    try {
+                        var pDown = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window });
+                        var pUp = new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window });
+                        target.dispatchEvent(pDown);
+                        target.dispatchEvent(pUp);
+                        
+                        var mDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window });
+                        var mUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window });
+                        var mClick = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window });
+                        target.dispatchEvent(mDown);
+                        target.dispatchEvent(mUp);
+                        target.dispatchEvent(mClick);
+                    } catch(e) {}
+                    
+                    // 4. Trigger direct click method
+                    if (typeof target.click === 'function') {
+                        target.click();
+                    }
+                    
+                    // 5. Direct navigation fallback for YouTube video cards
+                    if (anchor && anchor.href && anchor.href.length > 0 && !anchor.href.startsWith('javascript:')) {
+                        window.location.href = anchor.href;
                     }
                 })();
                 """
