@@ -253,9 +253,14 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                     if (!el) return;
                     
                     // 1. Find closest clickable link or button
-                    var anchor = el.closest('a');
-                    var button = el.closest('button') || el.closest('[role="button"]') || el.closest('[onclick]');
-                    var target = anchor || button || el;
+                    var anchor = el.closest('a') || el.closest('ytm-compact-video-renderer') || el.closest('ytm-video-with-context-renderer') || el.closest('ytm-media-item');
+                    var button = el.closest('button') || el.closest('[role="button"]') || el.closest('[onclick]') || el.closest('ytm-pivot-bar-item-renderer') || el.closest('.ytm-searchbox');
+                    var input = el.closest('input') || el.closest('textarea');
+                    var target = input || anchor || button || el;
+                    
+                    if (input) {
+                        input.focus();
+                    }
                     
                     // 2. Dispatch Touch Events
                     try {
@@ -339,12 +344,6 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            // Route YouTube URLs directly to the native Cinema Spatial Feed (no WKWebView overlay)
-            if urlString.contains("youtube.com") || urlString.contains("youtu.be") {
-                self.setViewState(.youtubeFeed)
-                return
-            }
-            
             if self.isCinemaMode {
                 self.exitCinemaMode()
             }
@@ -378,6 +377,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 wv.backgroundColor = .white
                 wv.scrollView.bounces = false
                 wv.scrollView.contentInsetAdjustmentBehavior = .never
+                wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
                 
                 // *** CRITICAL FIX: Attach WKWebView to the live UIWindow hierarchy ***
                 // iOS WebKit REQUIRES the view to be in a window for:
@@ -415,7 +415,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     
     private func startWebSnapshotTimer() {
         webSnapshotTimer?.invalidate()
-        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
             self?.captureWebSnapshot()
         }
     }
@@ -884,8 +884,8 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         // Dock Items
         let items: [(icon: String, title: String, state: SpatialViewState, action: () -> Void)] = [
             ("🏠", "Home", .home, { [weak self] in self?.setViewState(.home) }),
-            ("▶️", "YouTube", .youtubeFeed, { [weak self] in
-                self?.setViewState(.youtubeFeed)
+            ("▶️", "YouTube", .webBrowser(url: "https://m.youtube.com", title: "YouTube"), { [weak self] in
+                self?.openWebURL("https://m.youtube.com", title: "YouTube")
             }),
             ("🎬", "Cinema", .youtubeFeed, { [weak self] in
                 self?.setViewState(.youtubeFeed)
@@ -969,8 +969,17 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             ("🏠" as NSString).draw(at: CGPoint(x: homeRect.minX + 8, y: homeRect.minY + 7), withAttributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.white])
             zones.append(ClickableZone(rect: homeRect, action: { [weak self] in self?.goHome() }))
             
+            // Quick YouTube Button in Browser Bar
+            let ytBtnRect = CGRect(x: homeRect.maxX + 8, y: 12, width: 80, height: 36)
+            UIColor(red: 0.85, green: 0.15, blue: 0.15, alpha: 0.7).setFill()
+            UIBezierPath(roundedRect: ytBtnRect, cornerRadius: 8).fill()
+            ("▶ YouTube" as NSString).draw(at: CGPoint(x: ytBtnRect.minX + 8, y: ytBtnRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 12, weight: .bold), .foregroundColor: UIColor.white])
+            zones.append(ClickableZone(rect: ytBtnRect, action: { [weak self] in
+                self?.openWebURL("https://m.youtube.com", title: "YouTube")
+            }))
+            
             // URL pill
-            let urlRect = CGRect(x: homeRect.maxX + 16, y: 12, width: rect.width - 420, height: 36)
+            let urlRect = CGRect(x: ytBtnRect.maxX + 12, y: 12, width: rect.width - 500, height: 36)
             UIColor(red: 0.04, green: 0.06, blue: 0.12, alpha: 0.9).setFill()
             let uPath = UIBezierPath(roundedRect: urlRect, cornerRadius: 10)
             uPath.fill()
@@ -980,6 +989,9 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             
             let displayURL = "🔒 " + (currentWebURL.isEmpty ? url : currentWebURL)
             (displayURL as NSString).draw(at: CGPoint(x: urlRect.minX + 14, y: urlRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: UIColor.white])
+            zones.append(ClickableZone(rect: urlRect, action: { [weak self] in
+                self?.openWebURL("https://m.youtube.com", title: "YouTube")
+            }))
             
             // Close Browser Button
             let closeBtnRect = CGRect(x: rect.maxX - 110, y: 12, width: 95, height: 36)
@@ -1167,12 +1179,12 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         
         let appCards: [AppCardData] = [
             AppCardData(
-                icon: "🔍",
-                title: "Google Search",
-                desc: "Browse the web with desktop-class performance",
-                gradient: [UIColor(red: 0.10, green: 0.18, blue: 0.35, alpha: 0.8), UIColor(red: 0.04, green: 0.08, blue: 0.18, alpha: 0.8)],
+                icon: "▶️",
+                title: "YouTube Web",
+                desc: "Search, browse channels, creators & live streams in VR",
+                gradient: [UIColor(red: 0.45, green: 0.06, blue: 0.06, alpha: 0.85), UIColor(red: 0.18, green: 0.02, blue: 0.02, alpha: 0.85)],
                 action: { [weak self] in
-                    self?.openWebURL("https://www.google.com", title: "Google Search")
+                    self?.openWebURL("https://m.youtube.com", title: "YouTube")
                 }
             ),
             AppCardData(
@@ -1185,12 +1197,12 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 }
             ),
             AppCardData(
-                icon: "▶️",
-                title: "YouTube Spatial",
-                desc: "Stream trending videos, creators, 4K nature & music",
-                gradient: [UIColor(red: 0.40, green: 0.08, blue: 0.08, alpha: 0.8), UIColor(red: 0.15, green: 0.02, blue: 0.02, alpha: 0.8)],
+                icon: "🔍",
+                title: "Google Search",
+                desc: "Browse the web with desktop-class performance",
+                gradient: [UIColor(red: 0.10, green: 0.18, blue: 0.35, alpha: 0.8), UIColor(red: 0.04, green: 0.08, blue: 0.18, alpha: 0.8)],
                 action: { [weak self] in
-                    self?.setViewState(.youtubeFeed)
+                    self?.openWebURL("https://www.google.com", title: "Google Search")
                 }
             ),
             AppCardData(
