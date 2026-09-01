@@ -402,7 +402,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 // so the VR SceneKit views render ON TOP and hide the web view
                 // from the user.  The web view is still on-screen, which means
                 // the GPU composites its AVPlayer video layer — essential for
-                // drawHierarchy / layer.render to capture video frames.
+                // takeSnapshot() to capture video frames.
                 if let windowScene = UIApplication.shared.connectedScenes
                     .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
                    let window = windowScene.windows.first {
@@ -435,7 +435,10 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     
     private func startWebSnapshotTimer() {
         webSnapshotTimer?.invalidate()
-        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
+        // 0.1s interval — fast enough for smooth video, slow enough to
+        // avoid piling up snapshots.  captureWebSnapshot() already guards
+        // against overlapping captures via the isSnapshotting flag.
+        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.captureWebSnapshot()
         }
     }
@@ -513,40 +516,38 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         return nil
     }
     
-    /// Captures the current web view content into a UIImage.
+    /// Captures the current web view content into a UIImage via
+    /// WKWebView.takeSnapshot().  This goes through WebKit's internal IPC
+    /// to ask the WebContent process for a rendered frame — it is the
+    /// ONLY safe way to capture WKWebView content without deadlocking.
     ///
-    /// Strategy:
-    ///   1. `drawHierarchy(in:afterScreenUpdates:)` — captures the full
-    ///      UIKit view tree including any CALayer sublayers that AVPlayer
-    ///      uses for HTML5 video.  This is the **only** reliable way to
-    ///      get video frames out of a WKWebView on iOS.
-    ///   2. We call this on the **main thread** because UIKit rendering
-    ///      is not thread-safe.
-    ///   3. The result is cached in `cachedWebSnapshot` so the next
-    ///      `renderCurrentState()` call can draw it onto the 3D plane.
+    /// IMPORTANT: The web view MUST be on-screen and at full alpha for
+    /// the AVPlayer video layer to be included in the snapshot.  We
+    /// position it at (0,0) at z-index 0 (behind the VR views) to
+    /// satisfy this requirement while keeping it invisible to the user.
     public func captureWebSnapshot() {
         guard case .webBrowser = currentState, let webView = self.webView, !isSnapshotting else { return }
         isSnapshotting = true
         
-        let bounds = webView.bounds
-        guard bounds.width > 0, bounds.height > 0 else {
-            isSnapshotting = false
-            return
-        }
+        let config = WKSnapshotConfiguration()
+        config.rect = webView.bounds
+        // afterScreenUpdates = false is CRITICAL:
+        //   true  → forces WKWebView to re-render synchronously → blocks main thread → watchdog kill
+        //   false → grabs whatever WebKit last composited       → fast, non-blocking
+        config.afterScreenUpdates = false
+        // Let WebKit pick the optimal snapshot resolution (don't override snapshotWidth)
         
-        // Must run on the main thread for UIKit rendering.
-        // afterScreenUpdates: false avoids forcing a layout pass —
-        // we just grab whatever is currently composited.
-        UIGraphicsBeginImageContextWithOptions(bounds.size, true, 1.0)
-        webView.drawHierarchy(in: bounds, afterScreenUpdates: false)
-        let snapshot = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        isSnapshotting = false
-        if let image = snapshot {
-            self.cachedWebSnapshot = image
+        webView.takeSnapshot(with: config) { [weak self] image, error in
+            guard let self = self else { return }
+            self.isSnapshotting = false
+            
+            if let image = image {
+                self.cachedWebSnapshot = image
+            }
+            
+            // Trigger a full render pass so the 3D monitor texture updates
+            self.renderCurrentState()
         }
-        self.renderCurrentState()
     }
     
     // MARK: - State Navigation
@@ -855,8 +856,21 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     }
     
     // MARK: - Native CoreGraphics Canvas Renderer
+    /// Timestamp of the last render pass, used to throttle redraws
+    /// so the snapshot timer doesn't flood the main thread.
+    private var lastRenderTime: CFTimeInterval = 0
+    /// Minimum interval between full render passes (in seconds).
+    /// 0.08s = 12.5 fps cap — fast enough for smooth web video,
+    /// light enough to avoid main-thread starvation.
+    private let minRenderInterval: CFTimeInterval = 0.08
+    
     public func renderCurrentState() {
         guard !isCinemaMode else { return }
+        
+        // Throttle: skip if we rendered too recently
+        let now = CACurrentMediaTime()
+        guard now - lastRenderTime >= minRenderInterval else { return }
+        lastRenderTime = now
         
         let size = CGSize(width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
         let renderer = UIGraphicsImageRenderer(size: size)
