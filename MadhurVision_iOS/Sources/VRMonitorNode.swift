@@ -332,9 +332,12 @@ public final class VRMonitorNode: SCNNode {
             let contentRect = CGRect(x: 120, y: 80, width: size.width - 140, height: size.height - 100)
             
             switch currentState {
-            case .home, .youtubeFeed:
+            case .home:
                 let contentZones = drawHomeView(in: contentRect, ctx: cgCtx)
                 zones.append(contentsOf: contentZones)
+            case .youtubeFeed:
+                let youtubeZones = drawYouTubeFeedView(in: contentRect, ctx: cgCtx)
+                zones.append(contentsOf: youtubeZones)
             case .settings:
                 let settingsZones = drawSettingsView(in: contentRect, ctx: cgCtx)
                 zones.append(contentsOf: settingsZones)
@@ -473,6 +476,232 @@ public final class VRMonitorNode: SCNNode {
     private func drawHomeView(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
         var zones: [ClickableZone] = []
         
+        // 1. OMNIBAR SEARCH & NAVIGATION
+        let omniRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 48)
+        let omniPath = UIBezierPath(roundedRect: omniRect, cornerRadius: 14)
+        UIColor(red: 0.08, green: 0.12, blue: 0.22, alpha: 0.8).setFill()
+        omniPath.fill()
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.35).setStroke()
+        omniPath.lineWidth = 1.5
+        omniPath.stroke()
+        
+        // Nav buttons (Back, Forward, Reload)
+        let btnW: CGFloat = 36
+        let backRect = CGRect(x: omniRect.minX + 8, y: omniRect.minY + 6, width: btnW, height: 36)
+        UIColor(white: 1.0, alpha: 0.1).setFill()
+        UIBezierPath(roundedRect: backRect, cornerRadius: 8).fill()
+        ("◀" as NSString).draw(at: CGPoint(x: backRect.minX + 11, y: backRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: UIColor.white])
+        zones.append(ClickableZone(rect: backRect, action: { [weak self] in self?.goBack() }))
+        
+        let fwdRect = CGRect(x: backRect.maxX + 6, y: omniRect.minY + 6, width: btnW, height: 36)
+        UIBezierPath(roundedRect: fwdRect, cornerRadius: 8).fill()
+        ("▶" as NSString).draw(at: CGPoint(x: fwdRect.minX + 11, y: fwdRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: UIColor.white])
+        zones.append(ClickableZone(rect: fwdRect, action: { [weak self] in self?.goForward() }))
+        
+        let reloadRect = CGRect(x: fwdRect.maxX + 6, y: omniRect.minY + 6, width: btnW, height: 36)
+        UIBezierPath(roundedRect: reloadRect, cornerRadius: 8).fill()
+        ("↻" as NSString).draw(at: CGPoint(x: reloadRect.minX + 10, y: reloadRect.minY + 7), withAttributes: [.font: UIFont.systemFont(ofSize: 18, weight: .bold), .foregroundColor: UIColor.white])
+        zones.append(ClickableZone(rect: reloadRect, action: { [weak self] in self?.reload() }))
+        
+        // Search Input placeholder
+        let inputRect = CGRect(x: reloadRect.maxX + 12, y: omniRect.minY + 6, width: omniRect.width - 240, height: 36)
+        UIColor(red: 0.04, green: 0.06, blue: 0.12, alpha: 0.9).setFill()
+        let inPath = UIBezierPath(roundedRect: inputRect, cornerRadius: 8)
+        inPath.fill()
+        UIColor(white: 1.0, alpha: 0.15).setStroke()
+        inPath.lineWidth = 1
+        inPath.stroke()
+        
+        let placeholder = "🔍 Search Google, YouTube, or enter URL (e.g. google.com, youtube.com)..."
+        (placeholder as NSString).draw(at: CGPoint(x: inputRect.minX + 14, y: inputRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: UIColor.white.withAlphaComponent(0.6)])
+        zones.append(ClickableZone(rect: inputRect, action: { [weak self] in
+            guard let self = self else { return }
+            self.startCinemaStream(item: self.cinemaCatalog[0])
+        }))
+        
+        // Open button
+        let openBtnRect = CGRect(x: omniRect.maxX - 100, y: omniRect.minY + 6, width: 92, height: 36)
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.9).setFill()
+        let obPath = UIBezierPath(roundedRect: openBtnRect, cornerRadius: 8)
+        obPath.fill()
+        let oText = "Open ↵"
+        (oText as NSString).draw(at: CGPoint(x: openBtnRect.minX + 18, y: openBtnRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 14, weight: .bold), .foregroundColor: UIColor.black])
+        zones.append(ClickableZone(rect: openBtnRect, action: { [weak self] in
+            guard let self = self else { return }
+            self.startCinemaStream(item: self.cinemaCatalog[0])
+        }))
+        
+        // 2. HERO BANNER
+        let heroY = omniRect.maxY + 14
+        let heroRect = CGRect(x: rect.minX, y: heroY, width: rect.width, height: 60)
+        let heroTitle = "MadhurVision"
+        (heroTitle as NSString).draw(at: CGPoint(x: heroRect.minX + 8, y: heroRect.minY + 4), withAttributes: [.font: UIFont.systemFont(ofSize: 26, weight: .black), .foregroundColor: UIColor.white])
+        
+        let heroSub = "Your Spatial VR Computing System • Select an application to launch"
+        (heroSub as NSString).draw(at: CGPoint(x: heroRect.minX + 8, y: heroRect.minY + 36), withAttributes: [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.85)])
+        
+        // 3. FULL DESKTOP APP GRID (3 rows x 3 columns = 9 Apps)
+        struct AppCardData {
+            let icon: String
+            let title: String
+            let desc: String
+            let gradient: [UIColor]
+            let action: () -> Void
+        }
+        
+        let appCards: [AppCardData] = [
+            AppCardData(
+                icon: "🔍",
+                title: "Google Search",
+                desc: "Browse the web with desktop-class performance",
+                gradient: [UIColor(red: 0.10, green: 0.18, blue: 0.35, alpha: 0.8), UIColor(red: 0.04, green: 0.08, blue: 0.18, alpha: 0.8)],
+                action: { [weak self] in
+                    guard let self = self else { return }
+                    self.startCinemaStream(item: self.cinemaCatalog[0])
+                }
+            ),
+            AppCardData(
+                icon: "🎬",
+                title: "Spatial Cinema 4K",
+                desc: "Direct Metal GPU Video Streaming with zero lag & 60 FPS",
+                gradient: [UIColor(red: 0.35, green: 0.10, blue: 0.30, alpha: 0.8), UIColor(red: 0.12, green: 0.03, blue: 0.14, alpha: 0.8)],
+                action: { [weak self] in
+                    self?.setViewState(.youtubeFeed)
+                }
+            ),
+            AppCardData(
+                icon: "▶️",
+                title: "YouTube Live",
+                desc: "Stream trending videos, 4K nature, channels, and music",
+                gradient: [UIColor(red: 0.40, green: 0.08, blue: 0.08, alpha: 0.8), UIColor(red: 0.15, green: 0.02, blue: 0.02, alpha: 0.8)],
+                action: { [weak self] in
+                    self?.setViewState(.youtubeFeed)
+                }
+            ),
+            AppCardData(
+                icon: "🖥️",
+                title: "PC Remote Desktop",
+                desc: "Mirror your Windows laptop screen in VR at 60 FPS",
+                gradient: [UIColor(red: 0.08, green: 0.28, blue: 0.38, alpha: 0.8), UIColor(red: 0.02, green: 0.10, blue: 0.16, alpha: 0.8)],
+                action: { [weak self] in
+                    guard let self = self else { return }
+                    self.startCinemaStream(item: self.cinemaCatalog[3])
+                }
+            ),
+            AppCardData(
+                icon: "🎧",
+                title: "Lo-Fi Beats VR",
+                desc: "Relaxing chill beats to study and focus in 3D",
+                gradient: [UIColor(red: 0.25, green: 0.10, blue: 0.40, alpha: 0.8), UIColor(red: 0.08, green: 0.03, blue: 0.18, alpha: 0.8)],
+                action: { [weak self] in
+                    guard let self = self else { return }
+                    self.startCinemaStream(item: self.cinemaCatalog[2])
+                }
+            ),
+            AppCardData(
+                icon: "📚",
+                title: "Wikipedia Spatial",
+                desc: "Explore spatial knowledge, science, and history",
+                gradient: [UIColor(red: 0.12, green: 0.22, blue: 0.28, alpha: 0.8), UIColor(red: 0.04, green: 0.08, blue: 0.12, alpha: 0.8)],
+                action: { [weak self] in
+                    guard let self = self else { return }
+                    self.startCinemaStream(item: self.cinemaCatalog[4])
+                }
+            ),
+            AppCardData(
+                icon: "💬",
+                title: "Reddit VR",
+                desc: "Community discussions, news, tech, and gaming",
+                gradient: [UIColor(red: 0.35, green: 0.15, blue: 0.05, alpha: 0.8), UIColor(red: 0.14, green: 0.05, blue: 0.02, alpha: 0.8)],
+                action: { [weak self] in
+                    guard let self = self else { return }
+                    self.startCinemaStream(item: self.cinemaCatalog[1])
+                }
+            ),
+            AppCardData(
+                icon: "⚡",
+                title: "Speed Test",
+                desc: "Check your network streaming bandwidth & latency",
+                gradient: [UIColor(red: 0.20, green: 0.25, blue: 0.05, alpha: 0.8), UIColor(red: 0.08, green: 0.10, blue: 0.02, alpha: 0.8)],
+                action: { [weak self] in
+                    guard let self = self else { return }
+                    self.startCinemaStream(item: self.cinemaCatalog[5])
+                }
+            ),
+            AppCardData(
+                icon: "⚙️",
+                title: "System Settings",
+                desc: "Adjust display scale, stereo lens optical inset, & IPD",
+                gradient: [UIColor(red: 0.15, green: 0.18, blue: 0.25, alpha: 0.8), UIColor(red: 0.06, green: 0.07, blue: 0.12, alpha: 0.8)],
+                action: { [weak self] in
+                    self?.setViewState(.settings)
+                }
+            )
+        ]
+        
+        let gridY = heroRect.maxY + 10
+        let cardWidth: CGFloat = (rect.width - 40) / 3.0
+        let cardHeight: CGFloat = 160
+        let spacing: CGFloat = 16
+        
+        for (index, card) in appCards.enumerated() {
+            let row = CGFloat(index / 3)
+            let col = CGFloat(index % 3)
+            let cardRect = CGRect(
+                x: rect.minX + col * (cardWidth + spacing),
+                y: gridY + row * (cardHeight + spacing),
+                width: cardWidth,
+                height: cardHeight
+            )
+            
+            // Card Background Gradient
+            let cardPath = UIBezierPath(roundedRect: cardRect, cornerRadius: 16)
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let cColors = card.gradient.map { $0.cgColor }
+            if let cGrad = CGGradient(colorsSpace: colorSpace, colors: cColors as CFArray, locations: [0.0, 1.0]) {
+                ctx.saveGState()
+                cardPath.addClip()
+                ctx.drawLinearGradient(cGrad, start: CGPoint(x: cardRect.minX, y: cardRect.minY), end: CGPoint(x: cardRect.maxX, y: cardRect.maxY), options: [])
+                ctx.restoreGState()
+            }
+            
+            // Card border
+            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.25).setStroke()
+            cardPath.lineWidth = 1.2
+            cardPath.stroke()
+            
+            // Icon
+            let iconFont = UIFont.systemFont(ofSize: 34)
+            let iAttr: [NSAttributedString.Key: Any] = [.font: iconFont, .foregroundColor: UIColor.white]
+            (card.icon as NSString).draw(at: CGPoint(x: cardRect.minX + 16, y: cardRect.minY + 16), withAttributes: iAttr)
+            
+            // Title
+            let tFont = UIFont.systemFont(ofSize: 17, weight: .bold)
+            let tAttr: [NSAttributedString.Key: Any] = [.font: tFont, .foregroundColor: UIColor.white]
+            (card.title as NSString).draw(at: CGPoint(x: cardRect.minX + 64, y: cardRect.minY + 22), withAttributes: tAttr)
+            
+            // Description
+            let dFont = UIFont.systemFont(ofSize: 12)
+            let dAttr: [NSAttributedString.Key: Any] = [.font: dFont, .foregroundColor: UIColor.white.withAlphaComponent(0.75)]
+            let dRect = CGRect(x: cardRect.minX + 16, y: cardRect.minY + 68, width: cardRect.width - 32, height: 45)
+            (card.desc as NSString).draw(in: dRect, withAttributes: dAttr)
+            
+            // Launch Chip Badge
+            let launchRect = CGRect(x: cardRect.maxX - 80, y: cardRect.maxY - 34, width: 68, height: 22)
+            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.2).setFill()
+            UIBezierPath(roundedRect: launchRect, cornerRadius: 6).fill()
+            let lAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0)]
+            ("Launch ↵" as NSString).draw(at: CGPoint(x: launchRect.minX + 8, y: launchRect.minY + 4), withAttributes: lAttr)
+            
+            zones.append(ClickableZone(rect: cardRect, action: card.action))
+        }
+        
+        return zones
+    }
+    
+    private func drawYouTubeFeedView(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
+        var zones: [ClickableZone] = []
+        
         // 1. Header Hero Banner
         let heroRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 90)
         let heroPath = UIBezierPath(roundedRect: heroRect, cornerRadius: 18)
@@ -490,7 +719,7 @@ public final class VRMonitorNode: SCNNode {
         let heroSubAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.85)]
         (heroSub as NSString).draw(at: CGPoint(x: heroRect.minX + 24, y: heroRect.minY + 52), withAttributes: heroSubAttr)
         
-        // 2. Video Card Grid (2 rows x 3 cols)
+        // 2. Video Card Grid (2 rows x 3 cols = 6 Featured Videos)
         let gridY = heroRect.maxY + 24
         let cardWidth: CGFloat = (rect.width - 40) / 3.0
         let cardHeight: CGFloat = 270
