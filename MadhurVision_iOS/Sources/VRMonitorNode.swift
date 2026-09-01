@@ -2,6 +2,7 @@ import SceneKit
 import UIKit
 import AVFoundation
 import SpriteKit
+import WebKit
 
 /// Native Spatial Video Item Model
 public struct SpatialVideoItem: Identifiable {
@@ -14,8 +15,8 @@ public struct SpatialVideoItem: Identifiable {
     public let gradientColors: [UIColor]
 }
 
-/// Pure Native Spatial OS for VR Monitor (Zero WebKit)
-public final class VRMonitorNode: SCNNode {
+/// Pure Native Spatial OS for VR Monitor (Native Apps + Direct Cinema + Web Engine)
+public final class VRMonitorNode: SCNNode, WKNavigationDelegate {
     
     // MARK: - Canvas Dimensions
     public static let canvasWidth: CGFloat = 1440
@@ -27,12 +28,21 @@ public final class VRMonitorNode: SCNNode {
     // MARK: - State Machine
     public enum SpatialViewState {
         case home
+        case webBrowser(url: String, title: String)
         case cinemaTheater(item: SpatialVideoItem)
         case youtubeFeed
         case settings
     }
     
     public private(set) var currentState: SpatialViewState = .home
+    
+    // MARK: - Web Browser Engine
+    private var webView: WKWebView?
+    public private(set) var currentWebURL: String = ""
+    public private(set) var currentWebTitle: String = ""
+    private var isWebLoading: Bool = false
+    private var webSnapshotTimer: Timer?
+    private var isSnapshotting: Bool = false
     
     // MARK: - Cinema Player Engine (Direct Metal GPU Texture)
     private var cinemaPlayer: AVPlayer?
@@ -150,6 +160,9 @@ public final class VRMonitorNode: SCNNode {
     }
     
     public func cleanup() {
+        stopWebSnapshotTimer()
+        webView?.stopLoading()
+        webView = nil
         exitCinemaMode()
         activeClickableZones.removeAll()
     }
@@ -174,7 +187,39 @@ public final class VRMonitorNode: SCNNode {
         let pixelY = uv.y * VRMonitorNode.canvasHeight
         let hitPoint = CGPoint(x: pixelX, y: pixelY)
         
-        // Check clickable zones from top to bottom
+        // 1. Check if clicked on Web Browser content
+        if case .webBrowser = currentState {
+            // Check top navigation bar zones (y <= 70) or sidebar dock (x <= 100)
+            for zone in activeClickableZones {
+                if zone.rect.contains(hitPoint) {
+                    AppLogger.shared.log("[VRMonitorNode] Web Browser UI Click hit \(zone.rect)")
+                    zone.action()
+                    return
+                }
+            }
+            
+            // Dispatch click into DOM in WKWebView
+            if let webView = self.webView, pixelX > 100 && pixelY > 70 {
+                let webX = pixelX - 100
+                let webY = pixelY - 70
+                let js = """
+                (function() {
+                    var el = document.elementFromPoint(\(webX), \(webY));
+                    if(el) {
+                        el.click();
+                        el.focus();
+                    }
+                })();
+                """
+                webView.evaluateJavaScript(js, completionHandler: nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.captureWebSnapshot()
+                }
+                return
+            }
+        }
+        
+        // 2. Check native clickable zones from top to bottom
         for zone in activeClickableZones {
             if zone.rect.contains(hitPoint) {
                 AppLogger.shared.log("[VRMonitorNode] Native Click at (\(Int(pixelX)), \(Int(pixelY))) hit zone \(zone.rect)")
@@ -187,7 +232,97 @@ public final class VRMonitorNode: SCNNode {
     }
     
     public func simulateScroll(by delta: CGFloat) {
-        // Native scroll support for catalog/feeds if needed
+        if case .webBrowser = currentState, let webView = self.webView {
+            let js = "window.scrollBy(0, \(delta * 80));"
+            webView.evaluateJavaScript(js, completionHandler: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.captureWebSnapshot()
+            }
+        }
+    }
+    
+    // MARK: - In-VR Web Browser Engine (Google, Wikipedia, Reddit, SpeedTest)
+    public func openWebURL(_ urlString: String, title: String = "Web Browser") {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if self.isCinemaMode {
+                self.exitCinemaMode()
+            }
+            
+            self.currentWebURL = urlString
+            self.currentWebTitle = title
+            self.isWebLoading = true
+            self.currentState = .webBrowser(url: urlString, title: title)
+            
+            // Render instant loading frame so the user never sees a black screen
+            self.renderCurrentState()
+            
+            // Initialize WKWebView if not already created
+            if self.webView == nil {
+                let config = WKWebViewConfiguration()
+                config.allowsInlineMediaPlayback = true
+                config.mediaTypesRequiringUserActionForPlayback = []
+                
+                let webRect = CGRect(x: 0, y: 0, width: VRMonitorNode.canvasWidth - 100, height: VRMonitorNode.canvasHeight - 70)
+                let wv = WKWebView(frame: webRect, configuration: config)
+                wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+                wv.navigationDelegate = self
+                wv.isOpaque = true
+                wv.backgroundColor = .white
+                self.webView = wv
+            }
+            
+            if let url = URL(string: urlString) {
+                let req = URLRequest(url: url)
+                self.webView?.load(req)
+            }
+            
+            self.startWebSnapshotTimer()
+        }
+    }
+    
+    private func startWebSnapshotTimer() {
+        webSnapshotTimer?.invalidate()
+        webSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            self?.captureWebSnapshot()
+        }
+    }
+    
+    private func stopWebSnapshotTimer() {
+        webSnapshotTimer?.invalidate()
+        webSnapshotTimer = nil
+    }
+    
+    public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        isWebLoading = true
+        renderCurrentState()
+    }
+    
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isWebLoading = false
+        if let currentURL = webView.url?.absoluteString {
+            self.currentWebURL = currentURL
+        }
+        captureWebSnapshot()
+    }
+    
+    public func captureWebSnapshot() {
+        guard case .webBrowser = currentState, let webView = self.webView, !isSnapshotting else { return }
+        isSnapshotting = true
+        
+        let config = WKSnapshotConfiguration()
+        config.rect = webView.bounds
+        config.afterScreenUpdates = false
+        
+        webView.takeSnapshot(with: config) { [weak self] image, error in
+            guard let self = self else { return }
+            self.isSnapshotting = false
+            
+            if let image = image {
+                self.renderWebBrowserComposite(webImage: image)
+            }
+        }
     }
     
     // MARK: - State Navigation
@@ -197,6 +332,7 @@ public final class VRMonitorNode: SCNNode {
             if self.isCinemaMode {
                 self.exitCinemaMode()
             }
+            self.stopWebSnapshotTimer()
             self.currentState = state
             self.renderCurrentState()
         }
@@ -208,6 +344,12 @@ public final class VRMonitorNode: SCNNode {
     
     public func goBack() {
         switch currentState {
+        case .webBrowser:
+            if let webView = self.webView, webView.canGoBack {
+                webView.goBack()
+            } else {
+                goHome()
+            }
         case .home:
             break
         default:
@@ -215,9 +357,18 @@ public final class VRMonitorNode: SCNNode {
         }
     }
     
-    public func goForward() {}
+    public func goForward() {
+        if case .webBrowser = currentState, let webView = self.webView, webView.canGoForward {
+            webView.goForward()
+        }
+    }
+    
     public func reload() {
-        renderCurrentState()
+        if case .webBrowser = currentState, let webView = self.webView {
+            webView.reload()
+        } else {
+            renderCurrentState()
+        }
     }
     
     // MARK: - Direct Metal GPU Video Cinema Engine
@@ -335,6 +486,9 @@ public final class VRMonitorNode: SCNNode {
             case .home:
                 let contentZones = drawHomeView(in: contentRect, ctx: cgCtx)
                 zones.append(contentsOf: contentZones)
+            case .webBrowser(let url, let title):
+                let webLoadingZones = drawWebBrowserLoadingView(in: contentRect, url: url, title: title, ctx: cgCtx)
+                zones.append(contentsOf: webLoadingZones)
             case .youtubeFeed:
                 let youtubeZones = drawYouTubeFeedView(in: contentRect, ctx: cgCtx)
                 zones.append(contentsOf: youtubeZones)
@@ -385,20 +539,27 @@ public final class VRMonitorNode: SCNNode {
         // Dock Items
         let items: [(icon: String, title: String, state: SpatialViewState, action: () -> Void)] = [
             ("🏠", "Home", .home, { [weak self] in self?.setViewState(.home) }),
-            ("🎬", "Cinema", .cinemaTheater(item: self.cinemaCatalog[0]), { [weak self] in
-                guard let self = self else { return }
-                self.startCinemaStream(item: self.cinemaCatalog[0])
+            ("🔍", "Google", .webBrowser(url: "https://www.google.com", title: "Google Search"), { [weak self] in
+                self?.openWebURL("https://www.google.com", title: "Google Search")
+            }),
+            ("🎬", "Cinema", .youtubeFeed, { [weak self] in
+                self?.setViewState(.youtubeFeed)
+            }),
+            ("📺", "YouTube", .youtubeFeed, { [weak self] in
+                self?.setViewState(.youtubeFeed)
             }),
             ("⚙️", "Settings", .settings, { [weak self] in self?.setViewState(.settings) }),
             ("🎯", "Center", .home, { [weak self] in self?.onRecalibrateRequested?() })
         ]
         
-        var yPos: CGFloat = 40
+        var yPos: CGFloat = 30
         for item in items {
-            let itemRect = CGRect(x: 10, y: yPos, width: 80, height: 75)
+            let itemRect = CGRect(x: 10, y: yPos, width: 80, height: 70)
             let isCurrent: Bool
             switch (currentState, item.state) {
-            case (.home, .home), (.settings, .settings):
+            case (.home, .home), (.settings, .settings), (.youtubeFeed, .youtubeFeed):
+                isCurrent = true
+            case (.webBrowser, .webBrowser):
                 isCurrent = true
             default:
                 isCurrent = false
@@ -414,28 +575,77 @@ public final class VRMonitorNode: SCNNode {
             }
             
             // Draw Icon
-            let iconFont = UIFont.systemFont(ofSize: 28)
+            let iconFont = UIFont.systemFont(ofSize: 26)
             let iconAttr: [NSAttributedString.Key: Any] = [.font: iconFont, .foregroundColor: UIColor.white]
             let iconSize = (item.icon as NSString).size(withAttributes: iconAttr)
-            (item.icon as NSString).draw(at: CGPoint(x: itemRect.midX - iconSize.width / 2, y: itemRect.minY + 10), withAttributes: iconAttr)
+            (item.icon as NSString).draw(at: CGPoint(x: itemRect.midX - iconSize.width / 2, y: itemRect.minY + 8), withAttributes: iconAttr)
             
             // Draw Label
-            let labelFont = UIFont.systemFont(ofSize: 13, weight: .bold)
+            let labelFont = UIFont.systemFont(ofSize: 12, weight: .bold)
             let labelAttr: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: isCurrent ? UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0) : UIColor.white.withAlphaComponent(0.8)]
             let labelSize = (item.title as NSString).size(withAttributes: labelAttr)
-            (item.title as NSString).draw(at: CGPoint(x: itemRect.midX - labelSize.width / 2, y: itemRect.minY + 46), withAttributes: labelAttr)
+            (item.title as NSString).draw(at: CGPoint(x: itemRect.midX - labelSize.width / 2, y: itemRect.minY + 44), withAttributes: labelAttr)
             
             zones.append(ClickableZone(rect: itemRect, action: item.action))
-            yPos += 95
+            yPos += 82
         }
         
         return zones
     }
     
-    private func drawTopBar(in rect: CGRect, ctx: CGContext) {
+    private func drawTopBar(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
+        var zones: [ClickableZone] = []
         let topBarRect = CGRect(x: rect.minX, y: 0, width: rect.width, height: 60)
-        UIColor(white: 1.0, alpha: 0.03).setFill()
+        UIColor(white: 1.0, alpha: 0.04).setFill()
         UIBezierPath(rect: topBarRect).fill()
+        
+        // Check if in Web Browser mode
+        if case .webBrowser(let url, let title) = currentState {
+            // Browser Navigation Toolbar
+            let btnW: CGFloat = 36
+            let backRect = CGRect(x: rect.minX + 16, y: 12, width: btnW, height: 36)
+            UIColor(white: 1.0, alpha: 0.12).setFill()
+            UIBezierPath(roundedRect: backRect, cornerRadius: 8).fill()
+            ("◀" as NSString).draw(at: CGPoint(x: backRect.minX + 11, y: backRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: UIColor.white])
+            zones.append(ClickableZone(rect: backRect, action: { [weak self] in self?.goBack() }))
+            
+            let fwdRect = CGRect(x: backRect.maxX + 8, y: 12, width: btnW, height: 36)
+            UIBezierPath(roundedRect: fwdRect, cornerRadius: 8).fill()
+            ("▶" as NSString).draw(at: CGPoint(x: fwdRect.minX + 11, y: fwdRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: UIColor.white])
+            zones.append(ClickableZone(rect: fwdRect, action: { [weak self] in self?.goForward() }))
+            
+            let reloadRect = CGRect(x: fwdRect.maxX + 8, y: 12, width: btnW, height: 36)
+            UIBezierPath(roundedRect: reloadRect, cornerRadius: 8).fill()
+            ("↻" as NSString).draw(at: CGPoint(x: reloadRect.minX + 10, y: reloadRect.minY + 7), withAttributes: [.font: UIFont.systemFont(ofSize: 18, weight: .bold), .foregroundColor: UIColor.white])
+            zones.append(ClickableZone(rect: reloadRect, action: { [weak self] in self?.reload() }))
+            
+            let homeRect = CGRect(x: reloadRect.maxX + 8, y: 12, width: btnW, height: 36)
+            UIBezierPath(roundedRect: homeRect, cornerRadius: 8).fill()
+            ("🏠" as NSString).draw(at: CGPoint(x: homeRect.minX + 8, y: homeRect.minY + 7), withAttributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.white])
+            zones.append(ClickableZone(rect: homeRect, action: { [weak self] in self?.goHome() }))
+            
+            // URL pill
+            let urlRect = CGRect(x: homeRect.maxX + 16, y: 12, width: rect.width - 420, height: 36)
+            UIColor(red: 0.04, green: 0.06, blue: 0.12, alpha: 0.9).setFill()
+            let uPath = UIBezierPath(roundedRect: urlRect, cornerRadius: 10)
+            uPath.fill()
+            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.4).setStroke()
+            uPath.lineWidth = 1
+            uPath.stroke()
+            
+            let displayURL = "🔒 " + (currentWebURL.isEmpty ? url : currentWebURL)
+            (displayURL as NSString).draw(at: CGPoint(x: urlRect.minX + 14, y: urlRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: UIColor.white])
+            
+            // Close Browser Button
+            let closeBtnRect = CGRect(x: rect.maxX - 110, y: 12, width: 95, height: 36)
+            UIColor(red: 0.85, green: 0.15, blue: 0.20, alpha: 0.85).setFill()
+            let cPath = UIBezierPath(roundedRect: closeBtnRect, cornerRadius: 8)
+            cPath.fill()
+            ("✕ Close" as NSString).draw(at: CGPoint(x: closeBtnRect.minX + 18, y: closeBtnRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 13, weight: .bold), .foregroundColor: UIColor.white])
+            zones.append(ClickableZone(rect: closeBtnRect, action: { [weak self] in self?.goHome() }))
+            
+            return zones
+        }
         
         // Title
         let titleFont = UIFont.systemFont(ofSize: 20, weight: .heavy)
@@ -443,6 +653,7 @@ public final class VRMonitorNode: SCNNode {
         let titleText: String
         switch currentState {
         case .home: titleText = "MadhurVision OS • Spatial Hub"
+        case .webBrowser(_, let title): titleText = "🌐 \(title)"
         case .cinemaTheater(let item): titleText = "🎬 Cinema Theater • \(item.category)"
         case .youtubeFeed: titleText = "📺 YouTube Spatial Feed"
         case .settings: titleText = "⚙️ System Settings"
@@ -471,6 +682,68 @@ public final class VRMonitorNode: SCNNode {
         let clockFont = UIFont.monospacedDigitSystemFont(ofSize: 18, weight: .bold)
         let clockAttr: [NSAttributedString.Key: Any] = [.font: clockFont, .foregroundColor: UIColor.white.withAlphaComponent(0.9)]
         (timeStr as NSString).draw(at: CGPoint(x: rect.maxX - 80, y: 18), withAttributes: clockAttr)
+        
+        return zones
+    }
+    
+    private func drawWebBrowserLoadingView(in rect: CGRect, url: String, title: String, ctx: CGContext) -> [ClickableZone] {
+        var zones: [ClickableZone] = []
+        
+        let containerRect = CGRect(x: rect.minX + 40, y: rect.minY + 40, width: rect.width - 80, height: rect.height - 80)
+        let cPath = UIBezierPath(roundedRect: containerRect, cornerRadius: 20)
+        UIColor(red: 0.06, green: 0.09, blue: 0.18, alpha: 0.9).setFill()
+        cPath.fill()
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3).setStroke()
+        cPath.lineWidth = 1.5
+        cPath.stroke()
+        
+        let icon = "🌐"
+        let iAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 56), .foregroundColor: UIColor.white]
+        (icon as NSString).draw(at: CGPoint(x: containerRect.midX - 28, y: containerRect.midY - 80), withAttributes: iAttr)
+        
+        let lTitle = "Loading \(title)..."
+        let tAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 22, weight: .bold), .foregroundColor: UIColor.white]
+        let tSize = (lTitle as NSString).size(withAttributes: tAttr)
+        (lTitle as NSString).draw(at: CGPoint(x: containerRect.midX - tSize.width / 2, y: containerRect.midY), withAttributes: tAttr)
+        
+        let uAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.8)]
+        let uSize = (url as NSString).size(withAttributes: uAttr)
+        (url as NSString).draw(at: CGPoint(x: containerRect.midX - uSize.width / 2, y: containerRect.midY + 36), withAttributes: uAttr)
+        
+        return zones
+    }
+    
+    private func renderWebBrowserComposite(webImage: UIImage) {
+        guard !isCinemaMode else { return }
+        
+        let size = CGSize(width: VRMonitorNode.canvasWidth, height: VRMonitorNode.canvasHeight)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        
+        var zones: [ClickableZone] = []
+        
+        let image = renderer.image { ctx in
+            let cgCtx = ctx.cgContext
+            
+            // 1. Draw Deep Space Background
+            drawBackgroundGradient(in: CGRect(origin: .zero, size: size), ctx: cgCtx)
+            
+            // 2. Draw Left Sidebar Dock
+            let dockZones = drawSidebarDock(in: size, ctx: cgCtx)
+            zones.append(contentsOf: dockZones)
+            
+            // 3. Draw Top Browser Header Bar
+            let mainArea = CGRect(x: 100, y: 0, width: size.width - 100, height: 60)
+            let topZones = drawTopBar(in: mainArea, ctx: cgCtx)
+            zones.append(contentsOf: topZones)
+            
+            // 4. Draw Web Page Content Area
+            let webRect = CGRect(x: 100, y: 60, width: size.width - 100, height: size.height - 60)
+            webImage.draw(in: webRect)
+        }
+        
+        self.activeClickableZones = zones
+        self.geometry?.firstMaterial?.diffuse.contents = image
+        self.onSnapshotImage?(image)
     }
     
     private func drawHomeView(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
@@ -515,8 +788,7 @@ public final class VRMonitorNode: SCNNode {
         let placeholder = "🔍 Search Google, YouTube, or enter URL (e.g. google.com, youtube.com)..."
         (placeholder as NSString).draw(at: CGPoint(x: inputRect.minX + 14, y: inputRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: UIColor.white.withAlphaComponent(0.6)])
         zones.append(ClickableZone(rect: inputRect, action: { [weak self] in
-            guard let self = self else { return }
-            self.startCinemaStream(item: self.cinemaCatalog[0])
+            self?.openWebURL("https://www.google.com", title: "Google Search")
         }))
         
         // Open button
@@ -527,8 +799,7 @@ public final class VRMonitorNode: SCNNode {
         let oText = "Open ↵"
         (oText as NSString).draw(at: CGPoint(x: openBtnRect.minX + 18, y: openBtnRect.minY + 9), withAttributes: [.font: UIFont.systemFont(ofSize: 14, weight: .bold), .foregroundColor: UIColor.black])
         zones.append(ClickableZone(rect: openBtnRect, action: { [weak self] in
-            guard let self = self else { return }
-            self.startCinemaStream(item: self.cinemaCatalog[0])
+            self?.openWebURL("https://www.google.com", title: "Google Search")
         }))
         
         // 2. HERO BANNER
@@ -556,8 +827,7 @@ public final class VRMonitorNode: SCNNode {
                 desc: "Browse the web with desktop-class performance",
                 gradient: [UIColor(red: 0.10, green: 0.18, blue: 0.35, alpha: 0.8), UIColor(red: 0.04, green: 0.08, blue: 0.18, alpha: 0.8)],
                 action: { [weak self] in
-                    guard let self = self else { return }
-                    self.startCinemaStream(item: self.cinemaCatalog[0])
+                    self?.openWebURL("https://www.google.com", title: "Google Search")
                 }
             ),
             AppCardData(
@@ -584,8 +854,7 @@ public final class VRMonitorNode: SCNNode {
                 desc: "Mirror your Windows laptop screen in VR at 60 FPS",
                 gradient: [UIColor(red: 0.08, green: 0.28, blue: 0.38, alpha: 0.8), UIColor(red: 0.02, green: 0.10, blue: 0.16, alpha: 0.8)],
                 action: { [weak self] in
-                    guard let self = self else { return }
-                    self.startCinemaStream(item: self.cinemaCatalog[3])
+                    self?.openWebURL("http://192.168.31.115:8082", title: "PC Remote Monitor")
                 }
             ),
             AppCardData(
@@ -604,8 +873,7 @@ public final class VRMonitorNode: SCNNode {
                 desc: "Explore spatial knowledge, science, and history",
                 gradient: [UIColor(red: 0.12, green: 0.22, blue: 0.28, alpha: 0.8), UIColor(red: 0.04, green: 0.08, blue: 0.12, alpha: 0.8)],
                 action: { [weak self] in
-                    guard let self = self else { return }
-                    self.startCinemaStream(item: self.cinemaCatalog[4])
+                    self?.openWebURL("https://www.wikipedia.org", title: "Wikipedia Spatial")
                 }
             ),
             AppCardData(
@@ -614,8 +882,7 @@ public final class VRMonitorNode: SCNNode {
                 desc: "Community discussions, news, tech, and gaming",
                 gradient: [UIColor(red: 0.35, green: 0.15, blue: 0.05, alpha: 0.8), UIColor(red: 0.14, green: 0.05, blue: 0.02, alpha: 0.8)],
                 action: { [weak self] in
-                    guard let self = self else { return }
-                    self.startCinemaStream(item: self.cinemaCatalog[1])
+                    self?.openWebURL("https://www.reddit.com", title: "Reddit VR")
                 }
             ),
             AppCardData(
@@ -624,8 +891,7 @@ public final class VRMonitorNode: SCNNode {
                 desc: "Check your network streaming bandwidth & latency",
                 gradient: [UIColor(red: 0.20, green: 0.25, blue: 0.05, alpha: 0.8), UIColor(red: 0.08, green: 0.10, blue: 0.02, alpha: 0.8)],
                 action: { [weak self] in
-                    guard let self = self else { return }
-                    self.startCinemaStream(item: self.cinemaCatalog[5])
+                    self?.openWebURL("https://fast.com", title: "Fast.com Speed Test")
                 }
             ),
             AppCardData(
