@@ -547,8 +547,10 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             
             // Clear the cached snapshot when leaving the web browser so the next
             // visit starts fresh with the loading placeholder.
-            if case .webBrowser = self.currentState, !case .webBrowser = state {
-                self.cachedWebSnapshot = nil
+            if case .webBrowser = self.currentState {
+                if case .webBrowser = state {} else {
+                    self.cachedWebSnapshot = nil
+                }
             }
             
             self.currentState = state
