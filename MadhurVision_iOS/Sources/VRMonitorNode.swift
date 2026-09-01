@@ -10,6 +10,7 @@ public struct SpatialVideoItem: Identifiable {
     public let title: String
     public let channel: String
     public let category: String
+    public let duration: String
     public let streamURL: String
     public let icon: String
     public let gradientColors: [UIColor]
@@ -35,6 +36,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     }
     
     public private(set) var currentState: SpatialViewState = .home
+    public var selectedCategory: String = "All"
     
     // MARK: - Web Browser Engine
     private var webView: WKWebView?
@@ -48,8 +50,12 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     private var cinemaPlayer: AVPlayer?
     private var videoSKNode: SKVideoNode?
     private var videoSKScene: SKScene?
+    private var cinemaTimeObserver: Any?
     public private(set) var isCinemaMode: Bool = false
     public private(set) var currentVideoTitle: String = ""
+    public private(set) var currentPlaybackSeconds: Double = 0.0
+    public private(set) var totalDurationSeconds: Double = 0.0
+    public private(set) var isMuted: Bool = false
     
     // MARK: - Settings & Callbacks
     public var onScaleChanged: ((CGFloat) -> Void)?
@@ -59,68 +65,103 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     public var onExitVRRequested: (() -> Void)?
     public var onSnapshotImage: ((UIImage) -> Void)?
     public var onLensOffsetChanged: ((CGFloat, Float) -> Void)?
-    public var onOpenWebBrowser: ((String) -> Void)?
     
     public var currentScale: CGFloat = 1.0
     public var currentIPD: Float = 0.063
     public var currentLensOffset: CGFloat = 34.0
     public var isPassthroughActive: Bool = false
     
-    // MARK: - Curated 4K Cinema Video Catalog
+    // MARK: - Curated High-Definition Spatial Video Catalog
     public let cinemaCatalog: [SpatialVideoItem] = [
         SpatialVideoItem(
             id: "nature_4k",
-            title: "Earth 4K HDR • Breathtaking Wildlife & Landscapes",
+            title: "Earth 4K HDR • Breathtaking Wildlife & Forest Landscapes",
             channel: "BBC Earth Showcase",
             category: "Nature 4K",
+            duration: "10:34",
             streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
             icon: "🌿",
             gradientColors: [UIColor(red: 0.05, green: 0.35, blue: 0.20, alpha: 1.0), UIColor(red: 0.02, green: 0.15, blue: 0.08, alpha: 1.0)]
         ),
         SpatialVideoItem(
             id: "interstellar_imax",
-            title: "Interstellar Cosmic Flight • Deep Space 4K Experience",
+            title: "Interstellar Cosmic Flight • Deep Space Sci-Fi Experience",
             channel: "Hans Zimmer IMAX",
             category: "Sci-Fi IMAX",
+            duration: "12:14",
             streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
             icon: "🚀",
             gradientColors: [UIColor(red: 0.10, green: 0.15, blue: 0.45, alpha: 1.0), UIColor(red: 0.03, green: 0.05, blue: 0.20, alpha: 1.0)]
         ),
         SpatialVideoItem(
             id: "lofi_beats",
-            title: "Lofi Girl • Relaxing Chill Beats to Study in VR",
+            title: "Lofi Girl • 24/7 Relaxing Chill Beats to Code & Study in VR",
             channel: "Lofi Girl Records",
-            category: "Lo-Fi Music",
+            category: "Music & Lo-Fi",
+            duration: "LIVE",
             streamURL: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
             icon: "🎧",
             gradientColors: [UIColor(red: 0.40, green: 0.10, blue: 0.35, alpha: 1.0), UIColor(red: 0.15, green: 0.03, blue: 0.15, alpha: 1.0)]
         ),
         SpatialVideoItem(
-            id: "spatial_vision",
-            title: "Apple Vision Pro Spatial Computing Showcase",
-            channel: "Tech Vision Spatial",
-            category: "Spatial VR",
+            id: "synthwave_cyber",
+            title: "Cyberpunk Night Drive 4K • Retro Synthwave Chillout",
+            channel: "Neon Cyberwave",
+            category: "Music & Lo-Fi",
+            duration: "08:45",
             streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-            icon: "🥽",
-            gradientColors: [UIColor(red: 0.05, green: 0.30, blue: 0.45, alpha: 1.0), UIColor(red: 0.02, green: 0.10, blue: 0.20, alpha: 1.0)]
+            icon: "🌆",
+            gradientColors: [UIColor(red: 0.35, green: 0.05, blue: 0.45, alpha: 1.0), UIColor(red: 0.10, green: 0.02, blue: 0.20, alpha: 1.0)]
         ),
         SpatialVideoItem(
-            id: "blender_animation",
-            title: "Elephants Dream • 4K Open Movie Animation",
-            channel: "Blender Animation Studio",
-            category: "Animation 4K",
+            id: "sintel_epic",
+            title: "Sintel 4K • Epic Dragon Fantasy Cinema Experience",
+            channel: "Blender Open Cinema",
+            category: "Animation & Movies",
+            duration: "14:48",
+            streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+            icon: "🐉",
+            gradientColors: [UIColor(red: 0.45, green: 0.18, blue: 0.05, alpha: 1.0), UIColor(red: 0.20, green: 0.05, blue: 0.02, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "elephants_dream",
+            title: "Elephants Dream 4K • Surreal Cybernetic Sci-Fi",
+            channel: "Blender Studio",
+            category: "Animation & Movies",
+            duration: "10:54",
             streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
             icon: "🎞️",
-            gradientColors: [UIColor(red: 0.45, green: 0.20, blue: 0.05, alpha: 1.0), UIColor(red: 0.20, green: 0.08, blue: 0.02, alpha: 1.0)]
+            gradientColors: [UIColor(red: 0.30, green: 0.20, blue: 0.40, alpha: 1.0), UIColor(red: 0.10, green: 0.05, blue: 0.15, alpha: 1.0)]
         ),
         SpatialVideoItem(
             id: "apple_hls",
-            title: "Apple Adaptive Bitrate Spatial HLS Demo",
+            title: "Apple Adaptive Bitrate Spatial HLS Multi-Audio Stream",
             channel: "Apple Developer Streaming",
-            category: "Apple HLS",
+            category: "Apple & VR Tech",
+            duration: "30:00",
             streamURL: "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8",
             icon: "⚡",
-            gradientColors: [UIColor(red: 0.25, green: 0.05, blue: 0.45, alpha: 1.0), UIColor(red: 0.10, green: 0.02, blue: 0.20, alpha: 1.0)]
+            gradientColors: [UIColor(red: 0.05, green: 0.30, blue: 0.50, alpha: 1.0), UIColor(red: 0.02, green: 0.10, blue: 0.22, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "gaming_showcase",
+            title: "Unreal Engine 5 Next-Gen Graphics & Raytracing Showcase",
+            channel: "NextGen Gaming VR",
+            category: "Gaming",
+            duration: "09:12",
+            streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+            icon: "🎮",
+            gradientColors: [UIColor(red: 0.05, green: 0.25, blue: 0.40, alpha: 1.0), UIColor(red: 0.02, green: 0.08, blue: 0.15, alpha: 1.0)]
+        ),
+        SpatialVideoItem(
+            id: "ocean_4k",
+            title: "Deep Blue Ocean 4K • Coral Reefs & Marine Life HDR",
+            channel: "National Marine Showcase",
+            category: "Nature 4K",
+            duration: "15:20",
+            streamURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+            icon: "🐋",
+            gradientColors: [UIColor(red: 0.02, green: 0.25, blue: 0.45, alpha: 1.0), UIColor(red: 0.01, green: 0.08, blue: 0.20, alpha: 1.0)]
         )
     ]
     
@@ -259,7 +300,19 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             }
         }
         
-        // 2. Check native clickable zones from top to bottom
+        // 2. Check if in Cinema Mode and clicked on Timeline Scrub Bar
+        if isCinemaMode {
+            let trackRect = CGRect(x: 170, y: VRMonitorNode.canvasHeight - 90, width: VRMonitorNode.canvasWidth - 340, height: 35)
+            if trackRect.contains(hitPoint) && totalDurationSeconds > 0 {
+                let fraction = Double(max(0.0, min(1.0, (pixelX - 180) / (VRMonitorNode.canvasWidth - 360))))
+                let targetSec = fraction * totalDurationSeconds
+                self.seekCinemaTo(seconds: targetSec)
+                AppLogger.shared.log("[VRMonitorNode] Scrubbed cinema timeline to \(targetSec)s (\(Int(fraction * 100))%)")
+                return
+            }
+        }
+        
+        // 3. Check native clickable zones from top to bottom
         for zone in activeClickableZones {
             if zone.rect.contains(hitPoint) {
                 AppLogger.shared.log("[VRMonitorNode] Native Click at (\(Int(pixelX)), \(Int(pixelY))) hit zone \(zone.rect)")
@@ -286,17 +339,16 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
+            // Route YouTube URLs directly to the native Cinema Spatial Feed (no WKWebView overlay)
+            if urlString.contains("youtube.com") || urlString.contains("youtu.be") {
+                self.setViewState(.youtubeFeed)
+                return
+            }
+            
             if self.isCinemaMode {
                 self.exitCinemaMode()
             }
             
-            // Route to the REAL dual-eye browser overlay (bypasses broken snapshot pipeline)
-            if let handler = self.onOpenWebBrowser {
-                handler(urlString)
-                return
-            }
-            
-            // Fallback: old snapshot-based approach
             self.currentWebURL = urlString
             self.currentWebTitle = title
             self.isWebLoading = true
@@ -330,7 +382,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 // *** CRITICAL FIX: Attach WKWebView to the live UIWindow hierarchy ***
                 // iOS WebKit REQUIRES the view to be in a window for:
                 //   - Media/video playback (HTML5 <video>)
-                //   - Reliable JavaScript execution (YouTube's player framework)
+                //   - Reliable JavaScript execution
                 //   - Proper rendering compositing
                 // We add it behind everything at near-zero opacity so it's invisible
                 // to the user but fully functional for WebKit's compositor.
@@ -507,6 +559,10 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             guard let self = self else { return }
             
             self.cinemaPlayer?.pause()
+            if let obs = self.cinemaTimeObserver {
+                self.cinemaPlayer?.removeTimeObserver(obs)
+                self.cinemaTimeObserver = nil
+            }
             self.videoSKNode?.removeFromParent()
             self.videoSKNode = nil
             self.videoSKScene = nil
@@ -517,6 +573,8 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             self.cinemaPlayer = player
             self.isCinemaMode = true
             self.currentVideoTitle = item.title
+            self.currentPlaybackSeconds = 0.0
+            self.totalDurationSeconds = 0.0
             self.currentState = .cinemaTheater(item: item)
             
             // Create SpriteKit Video Texture for SceneKit (Zero-Copy Metal GPU Pipeline)
@@ -530,6 +588,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             videoNode.yScale = -1.0 // Coordinate alignment for SCNPlane texture mapping
             
             skScene.addChild(videoNode)
+            self.setupCinemaHUDOverlay(on: skScene, item: item)
             self.videoSKScene = skScene
             self.videoSKNode = videoNode
             
@@ -537,6 +596,17 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             self.geometry?.firstMaterial?.diffuse.contents = skScene
             videoNode.play()
             player.play()
+            
+            // Periodic time observer for interactive scrubbing & HUD updates
+            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+            self.cinemaTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+                guard let self = self else { return }
+                self.currentPlaybackSeconds = time.seconds
+                if let dur = player.currentItem?.duration.seconds, !dur.isNaN && dur > 0 {
+                    self.totalDurationSeconds = dur
+                }
+                self.updateCinemaHUDOverlay()
+            }
             
             // Auto-restore Web OS desktop when video finishes playing or errors
             NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
@@ -558,12 +628,16 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.cinemaPlayer?.pause()
+            if let obs = self.cinemaTimeObserver {
+                self.cinemaPlayer?.removeTimeObserver(obs)
+                self.cinemaTimeObserver = nil
+            }
             self.cinemaPlayer = nil
             self.videoSKNode?.removeFromParent()
             self.videoSKNode = nil
             self.videoSKScene = nil
             self.isCinemaMode = false
-            self.currentState = .home
+            self.currentState = .youtubeFeed
             self.renderCurrentState()
         }
     }
@@ -575,6 +649,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         } else {
             player.play()
         }
+        updateCinemaHUDOverlay()
     }
     
     public func seekCinema(by seconds: Double) {
@@ -582,6 +657,148 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         let current = player.currentTime()
         let target = CMTimeAdd(current, CMTime(seconds: seconds, preferredTimescale: 600))
         player.seek(to: target)
+    }
+    
+    public func seekCinemaTo(seconds: Double) {
+        guard let player = cinemaPlayer else { return }
+        let target = CMTime(seconds: max(0.0, seconds), preferredTimescale: 600)
+        player.seek(to: target)
+    }
+    
+    public func toggleMuteCinema() {
+        guard let player = cinemaPlayer else { return }
+        isMuted.toggle()
+        player.isMuted = isMuted
+        updateCinemaHUDOverlay()
+    }
+    
+    // MARK: - Cinema HUD In-VR SpriteKit Nodes
+    private func setupCinemaHUDOverlay(on scene: SKScene, item: SpatialVideoItem) {
+        // 1. Top HUD Container
+        let topBar = SKShapeNode(rectOf: CGSize(width: VRMonitorNode.canvasWidth, height: 70), cornerRadius: 0)
+        topBar.position = CGPoint(x: VRMonitorNode.canvasWidth / 2.0, y: VRMonitorNode.canvasHeight - 35)
+        topBar.fillColor = UIColor(white: 0.05, alpha: 0.75)
+        topBar.strokeColor = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3)
+        topBar.lineWidth = 1
+        topBar.name = "hud_top_bar"
+        topBar.yScale = -1.0 // Flip coordinate for SceneKit texture alignment
+        
+        let titleLabel = SKLabelNode(text: "\(item.icon)  \(item.title)")
+        titleLabel.fontSize = 20
+        titleLabel.fontName = "HelveticaNeue-Bold"
+        titleLabel.fontColor = .white
+        titleLabel.horizontalAlignmentMode = .left
+        titleLabel.verticalAlignmentMode = .center
+        titleLabel.position = CGPoint(x: -VRMonitorNode.canvasWidth / 2.0 + 30, y: 0)
+        titleLabel.name = "hud_title_label"
+        topBar.addChild(titleLabel)
+        
+        let closeBtn = SKShapeNode(rectOf: CGSize(width: 150, height: 42), cornerRadius: 10)
+        closeBtn.fillColor = UIColor(red: 0.9, green: 0.15, blue: 0.25, alpha: 0.85)
+        closeBtn.strokeColor = .clear
+        closeBtn.position = CGPoint(x: VRMonitorNode.canvasWidth / 2.0 - 95, y: 0)
+        
+        let closeText = SKLabelNode(text: "✕ Exit Cinema")
+        closeText.fontSize = 15
+        closeText.fontName = "HelveticaNeue-Bold"
+        closeText.fontColor = .white
+        closeText.horizontalAlignmentMode = .center
+        closeText.verticalAlignmentMode = .center
+        closeBtn.addChild(closeText)
+        topBar.addChild(closeBtn)
+        
+        scene.addChild(topBar)
+        
+        // 2. Bottom Controls HUD Container
+        let bottomBar = SKShapeNode(rectOf: CGSize(width: VRMonitorNode.canvasWidth, height: 80), cornerRadius: 0)
+        bottomBar.position = CGPoint(x: VRMonitorNode.canvasWidth / 2.0, y: 40)
+        bottomBar.fillColor = UIColor(white: 0.05, alpha: 0.85)
+        bottomBar.strokeColor = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3)
+        bottomBar.lineWidth = 1
+        bottomBar.name = "hud_bottom_bar"
+        bottomBar.yScale = -1.0
+        
+        // Progress Track Background
+        let trackBg = SKShapeNode(rectOf: CGSize(width: VRMonitorNode.canvasWidth - 360, height: 8), cornerRadius: 4)
+        trackBg.fillColor = UIColor(white: 1.0, alpha: 0.2)
+        trackBg.strokeColor = .clear
+        trackBg.position = CGPoint(x: 0, y: 22)
+        trackBg.name = "hud_track_bg"
+        bottomBar.addChild(trackBg)
+        
+        // Progress Fill
+        let progressFill = SKShapeNode(rectOf: CGSize(width: 10, height: 8), cornerRadius: 4)
+        progressFill.fillColor = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 1.0)
+        progressFill.strokeColor = .clear
+        progressFill.position = CGPoint(x: -((VRMonitorNode.canvasWidth - 360) / 2.0) + 5, y: 22)
+        progressFill.name = "hud_progress_fill"
+        bottomBar.addChild(progressFill)
+        
+        // Time Label
+        let timeLabel = SKLabelNode(text: "00:00 / 00:00")
+        timeLabel.fontSize = 14
+        timeLabel.fontName = "HelveticaNeue-Bold"
+        timeLabel.fontColor = UIColor(white: 1.0, alpha: 0.8)
+        timeLabel.horizontalAlignmentMode = .left
+        timeLabel.verticalAlignmentMode = .center
+        timeLabel.position = CGPoint(x: -((VRMonitorNode.canvasWidth - 360) / 2.0), y: -16)
+        timeLabel.name = "hud_time_label"
+        bottomBar.addChild(timeLabel)
+        
+        // Play/Pause & Transport Labels
+        let transportLabel = SKLabelNode(text: "⏪ -10s     ▶ / ⏸ Play / Pause     ⏩ +10s     🔄 Replay")
+        transportLabel.fontSize = 16
+        transportLabel.fontName = "HelveticaNeue-Bold"
+        transportLabel.fontColor = UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.95)
+        transportLabel.horizontalAlignmentMode = .center
+        transportLabel.verticalAlignmentMode = .center
+        transportLabel.position = CGPoint(x: 40, y: -16)
+        transportLabel.name = "hud_transport_label"
+        bottomBar.addChild(transportLabel)
+        
+        // Audio Mute Label
+        let muteLabel = SKLabelNode(text: "🔊 Audio")
+        muteLabel.fontSize = 15
+        muteLabel.fontName = "HelveticaNeue-Bold"
+        muteLabel.fontColor = .white
+        muteLabel.horizontalAlignmentMode = .right
+        muteLabel.verticalAlignmentMode = .center
+        muteLabel.position = CGPoint(x: ((VRMonitorNode.canvasWidth - 360) / 2.0), y: -16)
+        muteLabel.name = "hud_mute_label"
+        bottomBar.addChild(muteLabel)
+        
+        scene.addChild(bottomBar)
+    }
+    
+    private func updateCinemaHUDOverlay() {
+        guard let scene = videoSKScene,
+              let bottomBar = scene.childNode(withName: "hud_bottom_bar") as? SKShapeNode else { return }
+        
+        let total = totalDurationSeconds > 0 ? totalDurationSeconds : 1.0
+        let current = currentPlaybackSeconds
+        let fraction = CGFloat(max(0.0, min(1.0, current / total)))
+        
+        let trackWidth = VRMonitorNode.canvasWidth - 360
+        let fillWidth = max(8, trackWidth * fraction)
+        
+        if let progressFill = bottomBar.childNode(withName: "hud_progress_fill") as? SKShapeNode {
+            let path = CGPath(roundedRect: CGRect(x: -(trackWidth / 2.0), y: 18, width: fillWidth, height: 8), cornerWidth: 4, cornerHeight: 4, transform: nil)
+            progressFill.path = path
+            progressFill.position = .zero
+        }
+        
+        if let timeLabel = bottomBar.childNode(withName: "hud_time_label") as? SKLabelNode {
+            let curMin = Int(current) / 60
+            let curSec = Int(current) % 60
+            let totMin = Int(total) / 60
+            let totSec = Int(total) % 60
+            timeLabel.text = String(format: "%02d:%02d / %02d:%02d", curMin, curSec, totMin, totSec)
+        }
+        
+        if let muteLabel = bottomBar.childNode(withName: "hud_mute_label") as? SKLabelNode {
+            muteLabel.text = isMuted ? "🔇 Muted" : "🔊 Audio"
+            muteLabel.fontColor = isMuted ? .systemRed : .white
+        }
     }
     
     // MARK: - Native CoreGraphics Canvas Renderer
@@ -667,14 +884,14 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
         // Dock Items
         let items: [(icon: String, title: String, state: SpatialViewState, action: () -> Void)] = [
             ("🏠", "Home", .home, { [weak self] in self?.setViewState(.home) }),
-            ("🔍", "Google", .webBrowser(url: "https://www.google.com", title: "Google Search"), { [weak self] in
-                self?.openWebURL("https://www.google.com", title: "Google Search")
-            }),
-            ("📺", "YouTube", .webBrowser(url: "https://m.youtube.com", title: "YouTube"), { [weak self] in
-                self?.openWebURL("https://m.youtube.com", title: "YouTube")
+            ("▶️", "YouTube", .youtubeFeed, { [weak self] in
+                self?.setViewState(.youtubeFeed)
             }),
             ("🎬", "Cinema", .youtubeFeed, { [weak self] in
                 self?.setViewState(.youtubeFeed)
+            }),
+            ("🔍", "Google", .webBrowser(url: "https://www.google.com", title: "Google Search"), { [weak self] in
+                self?.openWebURL("https://www.google.com", title: "Google Search")
             }),
             ("⚙️", "Settings", .settings, { [weak self] in self?.setViewState(.settings) }),
             ("🎯", "Center", .home, { [weak self] in self?.onRecalibrateRequested?() })
@@ -969,11 +1186,11 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
             ),
             AppCardData(
                 icon: "▶️",
-                title: "YouTube",
-                desc: "Stream trending videos, channels, creators, and music on YouTube",
+                title: "YouTube Spatial",
+                desc: "Stream trending videos, creators, 4K nature & music",
                 gradient: [UIColor(red: 0.40, green: 0.08, blue: 0.08, alpha: 0.8), UIColor(red: 0.15, green: 0.02, blue: 0.02, alpha: 0.8)],
                 action: { [weak self] in
-                    self?.openWebURL("https://m.youtube.com", title: "YouTube")
+                    self?.setViewState(.youtubeFeed)
                 }
             ),
             AppCardData(
@@ -1096,30 +1313,65 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     private func drawYouTubeFeedView(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
         var zones: [ClickableZone] = []
         
-        // 1. Header Hero Banner
-        let heroRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 90)
-        let heroPath = UIBezierPath(roundedRect: heroRect, cornerRadius: 18)
-        UIColor(red: 0.08, green: 0.12, blue: 0.25, alpha: 0.6).setFill()
+        // 1. Header Banner
+        let heroRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 72)
+        let heroPath = UIBezierPath(roundedRect: heroRect, cornerRadius: 16)
+        UIColor(red: 0.08, green: 0.12, blue: 0.25, alpha: 0.7).setFill()
         heroPath.fill()
-        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3).setStroke()
-        heroPath.lineWidth = 1
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.35).setStroke()
+        heroPath.lineWidth = 1.2
         heroPath.stroke()
         
-        let heroTitle = "🎬 Direct Metal Spatial Cinema Theater"
-        let heroTitleAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 22, weight: .bold), .foregroundColor: UIColor.white]
-        (heroTitle as NSString).draw(at: CGPoint(x: heroRect.minX + 24, y: heroRect.minY + 18), withAttributes: heroTitleAttr)
+        let heroTitle = "🎬 Direct Metal Spatial Cinema & YouTube Theater"
+        (heroTitle as NSString).draw(at: CGPoint(x: heroRect.minX + 20, y: heroRect.minY + 12), withAttributes: [.font: UIFont.systemFont(ofSize: 20, weight: .bold), .foregroundColor: UIColor.white])
         
-        let heroSub = "Instant 60/120 FPS hardware decoded video streaming with zero WebKit overhead & zero lag."
-        let heroSubAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.85)]
-        (heroSub as NSString).draw(at: CGPoint(x: heroRect.minX + 24, y: heroRect.minY + 52), withAttributes: heroSubAttr)
+        let heroSub = "Direct GPU zero-copy hardware video decoding • Full 3D Hand Tracking & Laser Control"
+        (heroSub as NSString).draw(at: CGPoint(x: heroRect.minX + 20, y: heroRect.minY + 42), withAttributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.9)])
         
-        // 2. Video Card Grid (2 rows x 3 cols = 6 Featured Videos)
-        let gridY = heroRect.maxY + 24
+        // 2. Category Filter Bar
+        let categories = ["All", "Nature 4K", "Sci-Fi IMAX", "Music & Lo-Fi", "Animation & Movies", "Apple & VR Tech", "Gaming"]
+        let pillY = heroRect.maxY + 12
+        var pillX = rect.minX
+        let pillHeight: CGFloat = 34
+        
+        for cat in categories {
+            let isSel = (self.selectedCategory == cat)
+            let font = UIFont.systemFont(ofSize: 13, weight: isSel ? .bold : .medium)
+            let textWidth = (cat as NSString).size(withAttributes: [.font: font]).width
+            let pillWidth = textWidth + 24
+            let pillRect = CGRect(x: pillX, y: pillY, width: pillWidth, height: pillHeight)
+            
+            let pillPath = UIBezierPath(roundedRect: pillRect, cornerRadius: 17)
+            if isSel {
+                UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.95).setFill()
+                pillPath.fill()
+            } else {
+                UIColor(white: 1.0, alpha: 0.08).setFill()
+                pillPath.fill()
+                UIColor(white: 1.0, alpha: 0.2).setStroke()
+                pillPath.lineWidth = 1.0
+                pillPath.stroke()
+            }
+            
+            let attr: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: isSel ? UIColor.black : UIColor.white]
+            (cat as NSString).draw(at: CGPoint(x: pillRect.midX - textWidth / 2.0, y: pillRect.midY - 8), withAttributes: attr)
+            
+            zones.append(ClickableZone(rect: pillRect, action: { [weak self] in
+                guard let self = self else { return }
+                self.selectedCategory = cat
+                self.renderCurrentState()
+            }))
+            pillX += pillWidth + 10
+        }
+        
+        // 3. Filtered Catalog Grid
+        let filteredCatalog = (selectedCategory == "All") ? cinemaCatalog : cinemaCatalog.filter { $0.category.contains(selectedCategory) }
+        let gridY = pillY + pillHeight + 14
         let cardWidth: CGFloat = (rect.width - 40) / 3.0
-        let cardHeight: CGFloat = 270
+        let cardHeight: CGFloat = 265
         let spacing: CGFloat = 20
         
-        for (index, item) in cinemaCatalog.prefix(6).enumerated() {
+        for (index, item) in filteredCatalog.prefix(6).enumerated() {
             let row = CGFloat(index / 3)
             let col = CGFloat(index % 3)
             let cardRect = CGRect(
@@ -1128,68 +1380,73 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 width: cardWidth,
                 height: cardHeight
             )
-            
-            // Card Background Gradient
-            let cardPath = UIBezierPath(roundedRect: cardRect, cornerRadius: 18)
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let cColors = item.gradientColors.map { $0.cgColor }
-            if let cGrad = CGGradient(colorsSpace: colorSpace, colors: cColors as CFArray, locations: [0.0, 1.0]) {
-                ctx.saveGState()
-                cardPath.addClip()
-                ctx.drawLinearGradient(cGrad, start: CGPoint(x: cardRect.minX, y: cardRect.minY), end: CGPoint(x: cardRect.maxX, y: cardRect.maxY), options: [])
-                ctx.restoreGState()
-            }
-            
-            // Glowing border
-            UIColor(white: 1.0, alpha: 0.15).setStroke()
-            cardPath.lineWidth = 1.5
-            cardPath.stroke()
-            
-            // Video Thumbnail Area
-            let thumbRect = CGRect(x: cardRect.minX + 12, y: cardRect.minY + 12, width: cardRect.width - 24, height: 140)
-            let thumbPath = UIBezierPath(roundedRect: thumbRect, cornerRadius: 12)
-            UIColor(white: 0.0, alpha: 0.4).setFill()
-            thumbPath.fill()
-            
-            // Icon & Category Tag
-            let iconFont = UIFont.systemFont(ofSize: 42)
-            let iAttr: [NSAttributedString.Key: Any] = [.font: iconFont, .foregroundColor: UIColor.white]
-            let iSize = (item.icon as NSString).size(withAttributes: iAttr)
-            (item.icon as NSString).draw(at: CGPoint(x: thumbRect.midX - iSize.width / 2, y: thumbRect.midY - iSize.height / 2), withAttributes: iAttr)
-            
-            let tagRect = CGRect(x: thumbRect.minX + 8, y: thumbRect.maxY - 28, width: 100, height: 20)
-            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.3).setFill()
-            UIBezierPath(roundedRect: tagRect, cornerRadius: 6).fill()
-            let tagAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: UIColor.white]
-            (item.category as NSString).draw(at: CGPoint(x: tagRect.minX + 6, y: tagRect.minY + 3), withAttributes: tagAttr)
-            
-            // Video Title
-            let tFont = UIFont.systemFont(ofSize: 14, weight: .bold)
-            let tAttr: [NSAttributedString.Key: Any] = [.font: tFont, .foregroundColor: UIColor.white]
-            let titleBounding = CGRect(x: cardRect.minX + 14, y: thumbRect.maxY + 10, width: cardRect.width - 28, height: 40)
-            (item.title as NSString).draw(in: titleBounding, withAttributes: tAttr)
-            
-            // Channel & Play Button
-            let chFont = UIFont.systemFont(ofSize: 12)
-            let chAttr: [NSAttributedString.Key: Any] = [.font: chFont, .foregroundColor: UIColor.white.withAlphaComponent(0.6)]
-            (item.channel as NSString).draw(at: CGPoint(x: cardRect.minX + 14, y: cardRect.maxY - 35), withAttributes: chAttr)
-            
-            let playBtnRect = CGRect(x: cardRect.maxX - 85, y: cardRect.maxY - 42, width: 72, height: 28)
-            UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.9).setFill()
-            let pPath = UIBezierPath(roundedRect: playBtnRect, cornerRadius: 14)
-            pPath.fill()
-            let pAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 12, weight: .bold), .foregroundColor: UIColor.black]
-            let pText = "▶ Play"
-            let pSize = (pText as NSString).size(withAttributes: pAttr)
-            (pText as NSString).draw(at: CGPoint(x: playBtnRect.midX - pSize.width / 2, y: playBtnRect.midY - pSize.height / 2), withAttributes: pAttr)
-            
-            // Action
-            zones.append(ClickableZone(rect: cardRect, action: { [weak self] in
-                self?.startCinemaStream(item: item)
-            }))
+            let cardZone = drawVideoCard(item: item, in: cardRect, ctx: ctx)
+            zones.append(cardZone)
         }
         
         return zones
+    }
+    
+    private func drawVideoCard(item: SpatialVideoItem, in cardRect: CGRect, ctx: CGContext) -> ClickableZone {
+        // Card Background Gradient
+        let cardPath = UIBezierPath(roundedRect: cardRect, cornerRadius: 16)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let cColors = item.gradientColors.map { $0.cgColor }
+        if let cGrad = CGGradient(colorsSpace: colorSpace, colors: cColors as CFArray, locations: [0.0, 1.0]) {
+            ctx.saveGState()
+            cardPath.addClip()
+            ctx.drawLinearGradient(cGrad, start: CGPoint(x: cardRect.minX, y: cardRect.minY), end: CGPoint(x: cardRect.maxX, y: cardRect.maxY), options: [])
+            ctx.restoreGState()
+        }
+        
+        // Glowing border
+        UIColor(white: 1.0, alpha: 0.18).setStroke()
+        cardPath.lineWidth = 1.2
+        cardPath.stroke()
+        
+        // Thumbnail Area
+        let thumbRect = CGRect(x: cardRect.minX + 10, y: cardRect.minY + 10, width: cardRect.width - 20, height: 135)
+        let thumbPath = UIBezierPath(roundedRect: thumbRect, cornerRadius: 12)
+        UIColor(white: 0.0, alpha: 0.45).setFill()
+        thumbPath.fill()
+        
+        // Icon
+        let iconFont = UIFont.systemFont(ofSize: 40)
+        let iAttr: [NSAttributedString.Key: Any] = [.font: iconFont, .foregroundColor: UIColor.white]
+        let iSize = (item.icon as NSString).size(withAttributes: iAttr)
+        (item.icon as NSString).draw(at: CGPoint(x: thumbRect.midX - iSize.width / 2, y: thumbRect.midY - iSize.height / 2), withAttributes: iAttr)
+        
+        // Category Tag
+        let tagRect = CGRect(x: thumbRect.minX + 8, y: thumbRect.maxY - 26, width: 95, height: 18)
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.35).setFill()
+        UIBezierPath(roundedRect: tagRect, cornerRadius: 5).fill()
+        (item.category as NSString).draw(at: CGPoint(x: tagRect.minX + 5, y: tagRect.minY + 2), withAttributes: [.font: UIFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: UIColor.white])
+        
+        // Duration Badge
+        let durRect = CGRect(x: thumbRect.maxX - 55, y: thumbRect.maxY - 26, width: 47, height: 18)
+        UIColor(white: 0.0, alpha: 0.75).setFill()
+        UIBezierPath(roundedRect: durRect, cornerRadius: 5).fill()
+        (item.duration as NSString).draw(at: CGPoint(x: durRect.minX + 6, y: durRect.minY + 2), withAttributes: [.font: UIFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: UIColor.white])
+        
+        // Video Title
+        let titleBounding = CGRect(x: cardRect.minX + 12, y: thumbRect.maxY + 8, width: cardRect.width - 24, height: 38)
+        (item.title as NSString).draw(in: titleBounding, withAttributes: [.font: UIFont.systemFont(ofSize: 13, weight: .bold), .foregroundColor: UIColor.white])
+        
+        // Channel
+        (item.channel as NSString).draw(at: CGPoint(x: cardRect.minX + 12, y: cardRect.maxY - 34), withAttributes: [.font: UIFont.systemFont(ofSize: 11), .foregroundColor: UIColor.white.withAlphaComponent(0.65)])
+        
+        // Play Button
+        let playBtnRect = CGRect(x: cardRect.maxX - 80, y: cardRect.maxY - 40, width: 70, height: 26)
+        UIColor(red: 0.0, green: 0.83, blue: 1.0, alpha: 0.95).setFill()
+        UIBezierPath(roundedRect: playBtnRect, cornerRadius: 13).fill()
+        let pText = "▶ Play"
+        let pAttr: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: UIColor.black]
+        let pSize = (pText as NSString).size(withAttributes: pAttr)
+        (pText as NSString).draw(at: CGPoint(x: playBtnRect.midX - pSize.width / 2, y: playBtnRect.midY - pSize.height / 2), withAttributes: pAttr)
+        
+        return ClickableZone(rect: cardRect, action: { [weak self] in
+            self?.startCinemaStream(item: item)
+        })
     }
     
     private func drawSettingsView(in rect: CGRect, ctx: CGContext) -> [ClickableZone] {
@@ -1335,26 +1592,58 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     private func registerCinemaClickZones(item: SpatialVideoItem) {
         var zones: [ClickableZone] = []
         
-        // Left dock items (Home & Exit Cinema)
-        let dockWidth: CGFloat = 100
-        let homeZone = ClickableZone(rect: CGRect(x: 0, y: 40, width: dockWidth, height: 80), action: { [weak self] in
+        // 1. Left dock items (Home & Exit Cinema)
+        let dockZone = ClickableZone(rect: CGRect(x: 0, y: 0, width: 100, height: VRMonitorNode.canvasHeight), action: { [weak self] in
             self?.exitCinemaMode()
         })
-        zones.append(homeZone)
+        zones.append(dockZone)
         
-        // Top HUD Overlay: Close Theater Button (top right)
-        let closeRect = CGRect(x: VRMonitorNode.canvasWidth - 160, y: 15, width: 140, height: 45)
+        // 2. Top HUD Overlay: Close Theater Button (top right)
+        let closeRect = CGRect(x: VRMonitorNode.canvasWidth - 200, y: 0, width: 200, height: 75)
         let closeZone = ClickableZone(rect: closeRect, action: { [weak self] in
             self?.exitCinemaMode()
         })
         zones.append(closeZone)
         
-        // Play / Pause Zone (center tap anywhere on the screen)
-        let screenCenterRect = CGRect(x: 200, y: 100, width: VRMonitorNode.canvasWidth - 400, height: VRMonitorNode.canvasHeight - 200)
-        let playPauseZone = ClickableZone(rect: screenCenterRect, action: { [weak self] in
+        // 3. Bottom Transport Controls (Rewind -10s, Play/Pause, Fast-Forward +10s, Replay, Mute)
+        let bottomY = VRMonitorNode.canvasHeight - 65
+        
+        // -10s Seek Backward
+        let rewindRect = CGRect(x: VRMonitorNode.canvasWidth / 2.0 - 240, y: bottomY, width: 90, height: 60)
+        zones.append(ClickableZone(rect: rewindRect, action: { [weak self] in
+            self?.seekCinema(by: -10)
+        }))
+        
+        // Play / Pause
+        let playPauseRect = CGRect(x: VRMonitorNode.canvasWidth / 2.0 - 140, y: bottomY, width: 160, height: 60)
+        zones.append(ClickableZone(rect: playPauseRect, action: { [weak self] in
+            self?.togglePlayPauseCinema()
+        }))
+        
+        // +10s Seek Forward
+        let fwdRect = CGRect(x: VRMonitorNode.canvasWidth / 2.0 + 30, y: bottomY, width: 90, height: 60)
+        zones.append(ClickableZone(rect: fwdRect, action: { [weak self] in
+            self?.seekCinema(by: 10)
+        }))
+        
+        // Replay
+        let replayRect = CGRect(x: VRMonitorNode.canvasWidth / 2.0 + 130, y: bottomY, width: 90, height: 60)
+        zones.append(ClickableZone(rect: replayRect, action: { [weak self] in
+            self?.seekCinemaTo(seconds: 0)
+        }))
+        
+        // Mute / Unmute
+        let muteRect = CGRect(x: VRMonitorNode.canvasWidth - 240, y: bottomY, width: 120, height: 60)
+        zones.append(ClickableZone(rect: muteRect, action: { [weak self] in
+            self?.toggleMuteCinema()
+        }))
+        
+        // 4. Center Screen Tap (Toggle Play/Pause)
+        let screenCenterRect = CGRect(x: 120, y: 80, width: VRMonitorNode.canvasWidth - 240, height: VRMonitorNode.canvasHeight - 170)
+        let centerZone = ClickableZone(rect: screenCenterRect, action: { [weak self] in
             self?.togglePlayPauseCinema()
         })
-        zones.append(playPauseZone)
+        zones.append(centerZone)
         
         self.activeClickableZones = zones
     }

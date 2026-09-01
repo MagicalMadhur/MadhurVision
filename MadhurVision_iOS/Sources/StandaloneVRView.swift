@@ -3,7 +3,6 @@ import SceneKit
 import CoreMotion
 import Combine
 import AVFoundation
-import WebKit
 
 struct StandaloneVRView: View {
     @ObservedObject var appState: AppState
@@ -27,22 +26,6 @@ struct StandaloneVRView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .allowsHitTesting(false)
-            
-            // REAL Live Dual-Eye Web Browser Overlay
-            // Shown when a web URL is requested (YouTube, Google, etc.)
-            // Uses a REAL WKWebView with native touch & video playback
-            if let webURL = vrEngine.activeWebURL {
-                DualEyeWebBrowserOverlay(
-                    url: webURL,
-                    lensCenterOffset: vrEngine.lensCenterOffset,
-                    onClose: {
-                        vrEngine.activeWebURL = nil
-                        vrEngine.monitorNode?.setViewState(.home)
-                    }
-                )
-                .ignoresSafeArea()
-                .transition(.opacity)
-            }
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
@@ -53,244 +36,6 @@ struct StandaloneVRView: View {
         }
         .onDisappear { vrEngine.stop() }
         .statusBarHidden(true)
-    }
-}
-
-// MARK: - Dual-Eye Web Browser Overlay (Real WKWebView with Stereo Sync & Controls)
-
-class SharedWebSession: ObservableObject {
-    @Published var currentURL: String
-    @Published var webTitle: String = "Web Browser"
-    @Published var canGoBack: Bool = false
-    
-    // Commands to trigger across both views
-    @Published var triggerGoBack: Int = 0
-    @Published var triggerReload: Int = 0
-    
-    init(initialURL: String) {
-        self.currentURL = initialURL
-    }
-    
-    func navigate(to newURL: String) {
-        if self.currentURL != newURL {
-            self.currentURL = newURL
-        }
-    }
-}
-
-struct DualEyeWebBrowserOverlay: View {
-    let url: String
-    let lensCenterOffset: CGFloat
-    let onClose: () -> Void
-    
-    @StateObject private var session: SharedWebSession
-    
-    init(url: String, lensCenterOffset: CGFloat, onClose: @escaping () -> Void) {
-        self.url = url
-        self.lensCenterOffset = lensCenterOffset
-        self.onClose = onClose
-        _session = StateObject(wrappedValue: SharedWebSession(initialURL: url))
-    }
-    
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            
-            // Dual Eye WebViews with stereo offset
-            HStack(spacing: 0) {
-                // Left Eye (Audio Enabled)
-                EyeBrowserView(
-                    session: session,
-                    isMuted: false,
-                    offset: lensCenterOffset,
-                    onClose: onClose
-                )
-                
-                // Right Eye (Muted to prevent audio doubling / echo)
-                EyeBrowserView(
-                    session: session,
-                    isMuted: true,
-                    offset: -lensCenterOffset,
-                    onClose: onClose
-                )
-            }
-        }
-    }
-}
-
-struct EyeBrowserView: View {
-    @ObservedObject var session: SharedWebSession
-    let isMuted: Bool
-    let offset: CGFloat
-    let onClose: () -> Void
-    
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            // Live Interactive WebKit View
-            WebViewWrapper(session: session, isMuted: isMuted)
-                .offset(x: offset)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            
-            // Bottom In-VR Control Dock (Mirrored per Eye for comfort)
-            HStack(spacing: 12) {
-                // Back Button
-                Button(action: {
-                    session.triggerGoBack += 1
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("Back")
-                    }
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(session.canGoBack ? .white : .white.opacity(0.4))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.8))
-                    .cornerRadius(14)
-                }
-                .disabled(!session.canGoBack)
-                
-                // Reload Button
-                Button(action: {
-                    session.triggerReload += 1
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(8)
-                        .background(Color.black.opacity(0.8))
-                        .cornerRadius(14)
-                }
-                
-                // Close / Home Button
-                Button(action: onClose) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "xmark.circle.fill")
-                        Text("Exit to VR")
-                    }
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(LinearGradient(gradient: Gradient(colors: [Color.red.opacity(0.9), Color.orange.opacity(0.9)]), startPoint: .leading, endPoint: .trailing))
-                    .cornerRadius(14)
-                }
-            }
-            .offset(x: offset)
-            .padding(.bottom, 12)
-        }
-    }
-}
-
-struct WebViewWrapper: UIViewRepresentable {
-    @ObservedObject var session: SharedWebSession
-    let isMuted: Bool
-    
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
-        config.allowsAirPlayForMediaPlayback = true
-        config.allowsPictureInPictureMediaPlayback = true
-        
-        let pref = WKWebpagePreferences()
-        pref.allowsContentJavaScript = true
-        config.defaultWebpagePreferences = pref
-        
-        let wv = WKWebView(frame: .zero, configuration: config)
-        wv.isOpaque = true
-        wv.backgroundColor = .black
-        wv.scrollView.bounces = true
-        wv.scrollView.contentInsetAdjustmentBehavior = .never
-        wv.navigationDelegate = context.coordinator
-        wv.uiDelegate = context.coordinator
-        
-        context.coordinator.webView = wv
-        context.coordinator.isMuted = isMuted
-        
-        var targetURL = session.currentURL
-        if targetURL.contains("youtube.com") && !targetURL.contains("m.youtube.com") {
-            targetURL = targetURL.replacingOccurrences(of: "www.youtube.com", with: "m.youtube.com")
-        }
-        if let requestURL = URL(string: targetURL) {
-            wv.load(URLRequest(url: requestURL))
-        }
-        return wv
-    }
-    
-    func updateUIView(_ uiView: WKWebView, context: Context) {
-        // Handle Back command
-        if context.coordinator.lastGoBackTrigger != session.triggerGoBack {
-            context.coordinator.lastGoBackTrigger = session.triggerGoBack
-            if uiView.canGoBack {
-                uiView.goBack()
-            }
-        }
-        
-        // Handle Reload command
-        if context.coordinator.lastReloadTrigger != session.triggerReload {
-            context.coordinator.lastReloadTrigger = session.triggerReload
-            uiView.reload()
-        }
-    }
-    
-    func makeCoordinator() -> WebViewCoordinator {
-        WebViewCoordinator(session: session)
-    }
-    
-    class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        weak var webView: WKWebView?
-        let session: SharedWebSession
-        var isMuted: Bool = false
-        var lastGoBackTrigger: Int = 0
-        var lastReloadTrigger: Int = 0
-        
-        init(session: SharedWebSession) {
-            self.session = session
-        }
-        
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            DispatchQueue.main.async {
-                self.session.canGoBack = webView.canGoBack
-                if let title = webView.title, !title.isEmpty {
-                    self.session.webTitle = title
-                }
-            }
-            
-            // Inline video injection + optional mute for secondary eye
-            let muteScript = isMuted ? "v.muted = true;" : ""
-            let js = """
-            (function() {
-                var videos = document.querySelectorAll('video');
-                videos.forEach(function(v) {
-                    v.setAttribute('playsinline', 'true');
-                    v.setAttribute('webkit-playsinline', 'true');
-                    \(muteScript)
-                });
-            })();
-            """
-            webView.evaluateJavaScript(js, completionHandler: nil)
-        }
-        
-        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-            if let current = webView.url?.absoluteString, !isMuted {
-                DispatchQueue.main.async {
-                    self.session.currentURL = current
-                    self.session.canGoBack = webView.canGoBack
-                }
-            }
-        }
-        
-        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if let url = navigationAction.request.url {
-                webView.load(URLRequest(url: url))
-            }
-            return nil
-        }
-        
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            decisionHandler(.allow)
-        }
     }
 }
 
@@ -426,7 +171,6 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     @Published var monitorScale: CGFloat = 1.0
     @Published var lensCenterOffset: CGFloat = 34.0
     @Published var ipd: Float = 0.063
-    @Published var activeWebURL: String? = nil
     var onExit: (() -> Void)?
     
     private let cameraRig   = SCNNode()
@@ -662,13 +406,6 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         }
         monitor.onSnapshotImage = { [weak self] image in
             self?.enqueueSceneInput { $0.monitorImage = image }
-        }
-        
-        // When a web URL is requested, show the real dual-eye browser overlay
-        monitor.onOpenWebBrowser = { [weak self] url in
-            DispatchQueue.main.async {
-                self?.activeWebURL = url
-            }
         }
         
         // Position directly in front at eye level (Z = -2.0m)
