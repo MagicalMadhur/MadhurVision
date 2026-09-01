@@ -59,6 +59,7 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
     public var onExitVRRequested: (() -> Void)?
     public var onSnapshotImage: ((UIImage) -> Void)?
     public var onLensOffsetChanged: ((CGFloat, Float) -> Void)?
+    public var onOpenWebBrowser: ((String) -> Void)?
     
     public var currentScale: CGFloat = 1.0
     public var currentIPD: Float = 0.063
@@ -289,12 +290,17 @@ public final class VRMonitorNode: SCNNode, WKNavigationDelegate, WKUIDelegate {
                 self.exitCinemaMode()
             }
             
+            // Route to the REAL dual-eye browser overlay (bypasses broken snapshot pipeline)
+            if let handler = self.onOpenWebBrowser {
+                handler(urlString)
+                return
+            }
+            
+            // Fallback: old snapshot-based approach
             self.currentWebURL = urlString
             self.currentWebTitle = title
             self.isWebLoading = true
             self.currentState = .webBrowser(url: urlString, title: title)
-            
-            // Render instant loading frame so the user never sees a black screen
             self.renderCurrentState()
             
             // Initialize WKWebView if not already created

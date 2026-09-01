@@ -3,6 +3,7 @@ import SceneKit
 import CoreMotion
 import Combine
 import AVFoundation
+import WebKit
 
 struct StandaloneVRView: View {
     @ObservedObject var appState: AppState
@@ -26,6 +27,22 @@ struct StandaloneVRView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .allowsHitTesting(false)
+            
+            // REAL Live Dual-Eye Web Browser Overlay
+            // Shown when a web URL is requested (YouTube, Google, etc.)
+            // Uses a REAL WKWebView with native touch & video playback
+            if let webURL = vrEngine.activeWebURL {
+                DualEyeWebBrowserOverlay(
+                    url: webURL,
+                    lensCenterOffset: vrEngine.lensCenterOffset,
+                    onClose: {
+                        vrEngine.activeWebURL = nil
+                        vrEngine.monitorNode?.setViewState(.home)
+                    }
+                )
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
@@ -36,6 +53,116 @@ struct StandaloneVRView: View {
         }
         .onDisappear { vrEngine.stop() }
         .statusBarHidden(true)
+    }
+}
+
+// MARK: - Dual-Eye Web Browser Overlay (Real WKWebView with native video playback)
+
+struct DualEyeWebBrowserOverlay: View {
+    let url: String
+    let lensCenterOffset: CGFloat
+    let onClose: () -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            HStack(spacing: 0) {
+                // Left Eye - Real interactive WKWebView
+                WebViewWrapper(url: url)
+                    .padding(.leading, lensCenterOffset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                // Right Eye - Second WKWebView (same URL)
+                WebViewWrapper(url: url)
+                    .padding(.trailing, lensCenterOffset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            
+            // Close button overlay (centered bottom)
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 18))
+                            Text("Close Browser")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.75))
+                        .cornerRadius(20)
+                    }
+                    Spacer()
+                }
+                .padding(.bottom, 12)
+            }
+        }
+    }
+}
+
+struct WebViewWrapper: UIViewRepresentable {
+    let url: String
+    
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.allowsAirPlayForMediaPlayback = true
+        
+        let wv = WKWebView(frame: .zero, configuration: config)
+        wv.isOpaque = true
+        wv.backgroundColor = .white
+        wv.scrollView.bounces = false
+        wv.scrollView.contentInsetAdjustmentBehavior = .never
+        wv.navigationDelegate = context.coordinator
+        wv.uiDelegate = context.coordinator
+        
+        // Load the URL
+        var targetURL = url
+        if targetURL.contains("youtube.com") && !targetURL.contains("m.youtube.com") {
+            targetURL = targetURL.replacingOccurrences(of: "www.youtube.com", with: "m.youtube.com")
+        }
+        if let requestURL = URL(string: targetURL) {
+            wv.load(URLRequest(url: requestURL))
+        }
+        return wv
+    }
+    
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    
+    func makeCoordinator() -> WebViewCoordinator {
+        WebViewCoordinator()
+    }
+    
+    class WebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            let js = """
+            (function() {
+                var videos = document.querySelectorAll('video');
+                videos.forEach(function(v) {
+                    v.setAttribute('playsinline', 'true');
+                    v.setAttribute('webkit-playsinline', 'true');
+                });
+            })();
+            """
+            webView.evaluateJavaScript(js, completionHandler: nil)
+        }
+        
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if let url = navigationAction.request.url {
+                webView.load(URLRequest(url: url))
+            }
+            return nil
+        }
+        
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            decisionHandler(.allow)
+        }
     }
 }
 
@@ -171,13 +298,14 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
     @Published var monitorScale: CGFloat = 1.0
     @Published var lensCenterOffset: CGFloat = 34.0
     @Published var ipd: Float = 0.063
+    @Published var activeWebURL: String? = nil
     var onExit: (() -> Void)?
     
     private let cameraRig   = SCNNode()
     private let motionManager = CMMotionManager()
     
     // Single unified monitor
-    private var monitorNode: VRMonitorNode?
+    private(set) var monitorNode: VRMonitorNode?
     
     private var handCursor: HandCursorNode?
     private var mouseCursor: MouseCursorNode?
@@ -406,6 +534,13 @@ class VREngine: NSObject, ObservableObject, SCNSceneRendererDelegate {
         }
         monitor.onSnapshotImage = { [weak self] image in
             self?.enqueueSceneInput { $0.monitorImage = image }
+        }
+        
+        // When a web URL is requested, show the real dual-eye browser overlay
+        monitor.onOpenWebBrowser = { [weak self] url in
+            DispatchQueue.main.async {
+                self?.activeWebURL = url
+            }
         }
         
         // Position directly in front at eye level (Z = -2.0m)
